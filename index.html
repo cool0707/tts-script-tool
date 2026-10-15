@@ -308,9 +308,9 @@ function buildBody(chunkEntries) {
   const s = S();
   const used = new Set(chunkEntries.map((e) => e.spk));
   const generationConfig = { temperature: s.temperature, responseModalities: ["AUDIO"] };
-  let text;
+  let text, parts;
   if (used.size >= 2) {
-    text = chunkEntries.map((e) => `Speaker ${e.spk + 1}: ${e.text}`).join("\n");
+    parts = chunkEntries.map((e) => ({ text: e.text, speech_metadata: { speaker: `Speaker ${e.spk + 1}` } }));
     const mv = {
       speakerVoiceConfigs: s.speakers.map((sp, i) => ({
         speaker: `Speaker ${i + 1}`,
@@ -322,9 +322,10 @@ function buildBody(chunkEntries) {
   } else {
     const spk = chunkEntries[0].spk;
     text = chunkEntries.map((e) => e.text).join("\n");
+    parts = [{ text }];
     generationConfig.speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName: s.speakers[spk].voice } } };
   }
-  return { contents: [{ role: "user", parts: [{ text }] }], generationConfig };
+  return { contents: [{ role: "user", parts }], generationConfig };
 }
 async function callApi(body, signal) {
   const s = S();
