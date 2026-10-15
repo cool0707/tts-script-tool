@@ -11,7 +11,7 @@
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;padding:0 16px calc(40px + env(safe-area-inset-bottom))}
 h1{font-size:18px;margin:0;padding:14px 0 6px}
-section,details{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:12px 0}
+section,details.box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:12px 0}
 summary{font-weight:600;cursor:pointer;min-height:28px}
 label{display:block;font-size:13px;color:var(--sub);margin:10px 0 4px}
 input,select,textarea,button{font:inherit;color:var(--fg)}
@@ -19,6 +19,7 @@ input[type=text],input[type=password],input[type=number],select,textarea{width:1
 textarea{min-height:42vh;resize:vertical;line-height:1.6}
 button{min-height:44px;padding:8px 14px;border:1px solid var(--line);border-radius:8px;background:var(--card);cursor:pointer}
 button.primary{background:var(--acc);color:var(--accfg);border-color:var(--acc);font-weight:600}
+button.small{min-height:36px;padding:4px 10px;font-size:14px}
 button:disabled{opacity:.5}
 .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 .row>*{flex:1 1 auto}
@@ -32,6 +33,27 @@ button:disabled{opacity:.5}
 .res .t{font-size:13px;color:var(--sub);white-space:pre-wrap;max-height:4.8em;overflow:hidden}
 input[type=file]{display:none}
 .hint{font-size:12px;color:var(--sub)}
+.spk{border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:10px}
+.spk-head{display:flex;justify-content:space-between;align-items:center;font-weight:600}
+.tag{font-size:11px;padding:1px 6px;border-radius:6px;border:1px solid var(--line);color:var(--sub);margin-left:6px;font-weight:400}
+details.parts{margin-top:8px}
+.ins{position:sticky;top:0;z-index:5;background:var(--card);padding:4px 0}
+.chips{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:3px 0;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;min-height:38px;padding:4px 12px;border-radius:19px;font-size:14px;white-space:nowrap;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+.chip.spk-c{border-color:var(--acc);color:var(--acc)}
+.chip.edit{border-style:dashed;color:var(--sub)}
+.chip.se-c{border-color:var(--ok);color:var(--ok)}
+.serow{border:1px solid var(--line);border-radius:10px;padding:8px;margin-top:8px}
+.serow input[type=range]{width:100%}
+.chip.gen-c{background:var(--acc);border-color:var(--acc);color:var(--accfg);font-weight:600}
+#mini{border:1px solid var(--line);border-radius:10px;padding:6px 8px;margin-top:4px;background:var(--bg)}
+.mini-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+#miniBody audio{width:100%;height:40px;margin-top:4px}
+#miniBody .row{margin-top:4px}
+.tagrow{display:flex;gap:6px;align-items:center;margin-top:6px}
+.tagrow input{flex:1 1 auto;min-width:0}
+.tagrow button{flex:0 0 auto;min-width:44px;padding:4px 8px}
 </style>
 </head>
 <body>
@@ -52,53 +74,90 @@ input[type=file]{display:none}
   </div>
   <input type="file" id="fileIn" multiple accept=".txt,.md,.json,text/plain,application/json">
   <label for="text">セリフ(「話者名: セリフ」を1行ずつ。自動保存)</label>
+  <div class="ins">
+    <div class="chips" id="spkChips"></div>
+    <div class="chips" id="tagChips"></div>
+    <div class="chips" id="seChips"></div>
+    <div id="mini" hidden>
+      <div class="mini-head"><span id="miniStatus" class="info" style="margin:0"></span><button type="button" class="small" id="miniClose" aria-label="閉じる">✕</button></div>
+      <div id="miniBody"></div>
+    </div>
+  </div>
   <textarea id="text" spellcheck="false" placeholder="Fola: &lt;gasp&gt; いい考えだね！ &lt;laugh&gt;&#10;Rami: でしょ？"></textarea>
   <div class="info" id="info"></div>
 </section>
 
 <section>
-  <div class="grid2">
-    <div>
-      <label for="chunk" style="margin-top:0">1回で生成する行数(0=全部)</label>
-      <input type="number" id="chunk" min="0" step="1" inputmode="numeric">
-    </div>
-    <div>
-      <label for="gap" style="margin-top:0">結合時の無音(秒)</label>
-      <input type="number" id="gap" min="0" step="0.1" inputmode="decimal">
-    </div>
+  <label for="gap" style="margin-top:0">結合時の無音(秒)</label>
+  <input type="number" id="gap" min="0" step="0.1" inputmode="decimal" style="max-width:10em">
+  <div class="row">
+    <button id="btnGen" class="primary">全体を生成</button>
+    <button id="btnGenLine">カーソル行だけ生成</button>
   </div>
   <div class="row">
-    <button id="btnGen" class="primary">音声を生成</button>
     <button id="btnStop" disabled>停止</button>
   </div>
   <div class="info" id="status"></div>
   <div id="results"></div>
 </section>
 
-<details id="dVoice">
-  <summary>声の設定(Fola / Rami)</summary>
-  <div class="grid2">
-    <div><label>話者1 台本上の名前</label><input type="text" id="a0"></div>
-    <div><label>話者1 voiceName</label><input type="text" id="v0"></div>
-    <div><label>話者2 台本上の名前</label><input type="text" id="a1"></div>
-    <div><label>話者2 voiceName</label><input type="text" id="v1"></div>
+<details class="box" id="dVoice">
+  <summary>話者と声の設定</summary>
+  <div class="row">
+    <button id="btnVoices">声の一覧を取得</button>
+    <button id="btnAddSpk">話者を追加</button>
   </div>
+  <label style="display:flex;align-items:center;gap:8px;color:var(--fg);font-size:15px;min-height:36px"><input type="checkbox" id="showPresets" style="width:20px;height:20px;margin:0">プリセットの声も表示する</label>
+  <div class="info" id="voiceInfo"></div>
+  <div id="spkList"></div>
   <label>モデル</label><input type="text" id="model">
   <div class="grid2">
-    <div><label>mode</label><input type="text" id="mode"></div>
+    <div><label>mode(複数話者時)</label><input type="text" id="mode"></div>
     <div><label>temperature</label><input type="number" id="temp" step="0.1" min="0" max="2" inputmode="decimal"></div>
   </div>
-  <div class="hint">Playgroundの「Get code」と同じ値が初期設定です。</div>
+  <div class="hint">プリセット声の話者同士(2人まで)は1回のリクエストで会話として生成します。カスタム声(Voice Designで作った声)を含む場合は、API の仕様上、話者が切り替わるごとに分けて生成し、最後に1本に結合します。</div>
 </details>
 
-<details id="dApi">
+<details class="box" id="dTags">
+  <summary>表現タグの編集</summary>
+  <div class="hint">セリフ欄の上に並ぶタグです。タップでカーソル位置に挿入されます。&lt;&gt; は省略して入力してもOKです。</div>
+  <div class="tagrow">
+    <input type="text" id="newTag" placeholder="例: chuckle" autocapitalize="off" autocomplete="off" spellcheck="false" enterkeyhint="done">
+    <button id="btnAddTag" class="primary">追加</button>
+  </div>
+  <div id="tagList"></div>
+  <div class="row">
+    <button id="btnTagRec">推奨タグをすべて追加</button>
+    <button id="btnTagReset">初期値に戻す</button>
+  </div>
+</details>
+
+<details class="box" id="dSe">
+  <summary>効果音</summary>
+  <div class="hint">台本に1行で <b>[名前]</b> と書くと、その位置に効果音を挟みます。<b>[名前:0.1]</b> のように秒数を付けると、直前の音声の終わりから0.1秒後に鳴らし、次のセリフに重ねます(待たずに次へ進みます)。マイナス値(例 [名前:-0.5])なら直前のセリフの終わりに重なります。</div>
+  <label>Google Drive の効果音フォルダ(URL)</label>
+  <input type="text" id="driveFolder" placeholder="https://drive.google.com/drive/folders/…" autocapitalize="off" autocomplete="off" spellcheck="false">
+  <label>Drive用 APIキー(空欄なら Gemini のキーを使用)</label>
+  <input type="password" id="driveKey" autocomplete="off">
+  <label style="display:flex;align-items:center;gap:8px;color:var(--fg);font-size:15px;min-height:36px"><input type="checkbox" id="driveAuto" style="width:20px;height:20px;margin:0">起動時に自動で同期する</label>
+  <div class="row">
+    <button id="btnDriveSync" class="primary">Driveから同期</button>
+    <button id="btnSeAdd">端末のファイルを追加</button>
+  </div>
+  <div class="info" id="driveInfo"></div>
+  <input type="file" id="seIn" multiple accept="audio/*,.mp3,.wav,.m4a,.ogg,.aac">
+  <div id="seList"></div>
+  <div class="hint">効果音はこの端末のブラウザ内に保存されます(JSONバックアップには含まれません)。</div>
+</details>
+
+<details class="box" id="dApi">
   <summary>APIキーとバックアップ</summary>
   <label>Gemini APIキー(この端末のブラウザ内にのみ保存)</label>
   <input type="password" id="apiKey" autocomplete="off">
   <div class="row">
-    <button id="btnBackup">全台本をバックアップ(.json)</button>
+    <button id="btnBackup">全台本と話者設定をバックアップ(.json)</button>
   </div>
-  <div class="hint">バックアップ(.json)は「ファイルから読み込み」で戻せます。APIキーはバックアップに含まれません。</div>
+  <div class="hint">バックアップ(.json)には台本・話者設定・表現タグが入り、「ファイルから読み込み」で戻せます。APIキーは含まれません。</div>
 </details>
 
 <script>
@@ -112,19 +171,30 @@ const DEFAULTS = {
   model: "gemini-3.8-flash-tts",
   mode: "VERBATIM",
   temperature: 1,
-  chunk: 0,
   gap: 0.3,
   speakers: [
-    { alias: "Fola", voice: "Fola" },
-    { alias: "Rami", voice: "Rami" },
+    { alias: "Fola", voice: "Fola", style: "" },
+    { alias: "Rami", voice: "Rami", style: "" },
   ],
+  voiceCache: [],
+  showPresets: false,
+  tags: null,
+  drive: { folder: "", key: "", auto: true },
 };
+const DEFAULT_TAGS = ["<laugh>", "<chuckle>", "<giggle>", "<gasp>", "<sigh>", "<breath>", "<short pause>", "<long pause>", "<whispers>", "<cry>", "<sob>", "<cough>", "<yawn>", "<phew>", "<tsk>", "<shout>", "<scream>"];
+// Gemini 3.8 TTS ドキュメントの推奨タグ
+const RECOMMENDED_TAGS = ["<argh>", "<breath>", "<heavy breath>", "<exhales>", "<cackle>", "<cheer>", "<chuckle>", "<chuckles>", "<cry>", "<gasp>", "<giggle>", "<cough>", "<growl>", "<grunt>", "<grr>", "<groan>", "<hiss>", "<laugh>", "<laughter>", "<moan>", "<pant>", "<pff>", "<phew>", "<scream>", "<shout>", "<shriek>", "<sigh>", "<sighs>", "<sneeze>", "<snicker>", "<snort>", "<sob>", "<throat-clearing>", "<tsk>", "<whimper>", "<whispers>", "<whispering>", "<yawn>", "<short pause>", "<long pause>"];
 
 function loadState() {
   try {
     const s = JSON.parse(localStorage.getItem(LS));
     if (s && Array.isArray(s.scripts) && s.scripts.length) {
       s.settings = Object.assign({}, DEFAULTS, s.settings || {});
+      s.settings.speakers = (s.settings.speakers || []).map((sp) => Object.assign({ alias: "", voice: "", style: "" }, sp));
+      if (!s.settings.speakers.length) s.settings.speakers = JSON.parse(JSON.stringify(DEFAULTS.speakers));
+      if (!Array.isArray(s.settings.voiceCache)) s.settings.voiceCache = [];
+      if (!Array.isArray(s.settings.tags)) s.settings.tags = DEFAULT_TAGS.slice();
+      s.settings.drive = Object.assign({ folder: "", key: "", auto: true }, s.settings.drive || {});
       if (!s.scripts.find((x) => x.id === s.current)) s.current = s.scripts[0].id;
       return s;
     }
@@ -133,7 +203,7 @@ function loadState() {
   return {
     scripts: [{ id, name: "サンプル", text: "Fola: <gasp> それはいい考えだね！ <laugh>\nRami: でしょ？ さっそくやってみようよ。" }],
     current: id,
-    settings: Object.assign({}, DEFAULTS),
+    settings: Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), { tags: DEFAULT_TAGS.slice() }),
   };
 }
 let state = loadState();
@@ -156,15 +226,333 @@ function renderSelect() {
   $("text").value = cur().text;
   updateInfo();
 }
+/* ---------- 挿入チップ(話者名・表現タグ) ---------- */
+const ta = $("text");
+let sel = { s: null, e: null };
+const remember = () => { sel = { s: ta.selectionStart, e: ta.selectionEnd }; };
+["select", "keyup", "click", "input", "focus", "blur"].forEach((ev) => ta.addEventListener(ev, remember));
+document.addEventListener("selectionchange", () => { if (document.activeElement === ta) remember(); });
+function insertAtCursor(str, lineStart) {
+  const len = ta.value.length;
+  let s = sel.s == null ? len : Math.min(sel.s, len), e = sel.e == null ? len : Math.min(sel.e, len);
+  if (lineStart) {
+    const before = ta.value.slice(0, s);
+    if (before && !before.endsWith("\n")) str = "\n" + str;
+  }
+  ta.focus({ preventScroll: true });
+  ta.setRangeText(str, s, e, "end");
+  remember();
+  cur().text = ta.value; save(); updateInfo();
+}
+function chip(label, cls, onTap) {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "chip" + (cls ? " " + cls : ""); b.textContent = label;
+  // フォーカスをセリフ欄に残す(スマホでキーボードが閉じないように)
+  b.addEventListener("pointerdown", (ev) => { if (document.activeElement === ta) ev.preventDefault(); });
+  b.addEventListener("mousedown", (ev) => ev.preventDefault());
+  b.addEventListener("click", onTap);
+  return b;
+}
+function renderChips() {
+  const sb = $("spkChips"); sb.innerHTML = "";
+  const g = chip("▶ この行を生成", "gen-c", () => generateCurrentLine());
+  g.disabled = !!abortCtl; sb.appendChild(g);
+  S().speakers.forEach((sp) => { if (sp.alias) sb.appendChild(chip(sp.alias + ":", "spk-c", () => insertAtCursor(sp.alias + ": ", true))); });
+  const tb = $("tagChips"); tb.innerHTML = "";
+  S().tags.forEach((t) => tb.appendChild(chip(t, "", () => insertAtCursor(t, false))));
+  tb.appendChild(chip("✎ 編集", "edit", () => { $("dTags").open = true; $("dTags").scrollIntoView({ behavior: "smooth" }); }));
+  const eb = $("seChips"); eb.innerHTML = "";
+  seItems.forEach((x) => eb.appendChild(chip("🔊 " + x.name, "se-c", () => insertSeLine(`[${x.name}]`))));
+  eb.appendChild(chip(seItems.length ? "✎ 効果音" : "＋ 効果音を登録", "edit", () => { $("dSe").open = true; $("dSe").scrollIntoView({ behavior: "smooth" }); }));
+}
+// 効果音は独立した1行として挿入
+function insertSeLine(str) {
+  // 効果音は独立した1行。カーソル行が空ならそこへ、そうでなければその行の下へ入れる
+  const v = ta.value, len = v.length;
+  const pos = sel.s == null ? len : Math.min(sel.s, len);
+  const ls = v.lastIndexOf("\n", pos - 1) + 1;
+  let le = v.indexOf("\n", pos); if (le < 0) le = len;
+  if (v.slice(ls, le).trim() === "") { sel = { s: ls, e: le }; insertAtCursor(str, false); return; }
+  sel = { s: le, e: le };
+  insertAtCursor("\n" + str, false);
+}
+
+/* ---------- 効果音の保存(IndexedDB) ---------- */
+let seItems = []; // {id, name, vol, blob}
+const seDecoded = new Map(); // `${id}@${rate}` -> Float32Array
+function seDb() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open("tts-tool-se", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("se", { keyPath: "id" });
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+}
+async function seTx(mode, fn) {
+  const db = await seDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction("se", mode); const st = tx.objectStore("se");
+    const out = fn(st);
+    tx.oncomplete = () => res(out && out.result !== undefined ? out.result : undefined);
+    tx.onerror = () => rej(tx.error);
+  });
+}
+async function seLoad() {
+  try { seItems = (await seTx("readonly", (st) => st.getAll())) || []; seItems.sort((a, b) => (a.order || 0) - (b.order || 0)); }
+  catch (e) { seItems = []; }
+  renderSeList(); renderChips(); updateInfo();
+}
+const sePut = (x) => seTx("readwrite", (st) => st.put(x));
+const seName = (v) => v.replace(/[\[\]:：\n]/g, "").trim();
+const findSe = (name) => seItems.find((x) => x.name.toLowerCase() === name.toLowerCase());
+$("btnSeAdd").onclick = () => $("seIn").click();
+$("seIn").addEventListener("change", async (ev) => {
+  const files = Array.from(ev.target.files || []);
+  for (const f of files) {
+    let name = seName(f.name.replace(/\.[^.]+$/, "")) || "効果音";
+    let n = 2, base = name; while (findSe(name)) name = `${base}${n++}`;
+    const item = { id: uid(), name, vol: 1, blob: f, order: Date.now() + seItems.length };
+    try { await sePut(item); seItems.push(item); } catch (e) { setStatus("効果音の保存に失敗しました: " + e.message, true); }
+  }
+  ev.target.value = "";
+  renderSeList(); renderChips(); updateInfo();
+});
+// 名前を変えたら台本の [旧名] / [旧名:秒] も置換
+function renameSeInScripts(oldName, newName) {
+  const esc = oldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = () => new RegExp(`^([ \\t]*)\\[${esc}([:：][^\\]]*)?\\]`, "gim");
+  let n = 0;
+  for (const sc of state.scripts) {
+    sc.text = sc.text.replace(re(), (m, a, b) => { n++; return `${a}[${newName}${b || ""}]`; });
+  }
+  $("text").value = cur().text; save(); updateInfo();
+  return n;
+}
+let sePreview = null;
+function playSe(item) {
+  if (sePreview) { sePreview.pause(); URL.revokeObjectURL(sePreview.src); }
+  sePreview = new Audio(URL.createObjectURL(item.blob)); sePreview.volume = Math.min(1, item.vol); sePreview.play().catch(() => {});
+}
+function renderSeList() {
+  const box = $("seList"); box.innerHTML = "";
+  seItems.forEach((x, i) => {
+    const r = document.createElement("div"); r.className = "serow";
+    const top = document.createElement("div"); top.className = "tagrow"; top.style.marginTop = "0";
+    const nm = document.createElement("input"); nm.type = "text"; nm.value = x.name; nm.setAttribute("enterkeyhint", "done");
+    if (x.driveId) { nm.readOnly = true; nm.title = "Drive上のファイル名を変えると反映されます"; }
+    nm.onkeydown = (ev) => { if (ev.key === "Enter") nm.blur(); };
+    nm.onchange = async () => {
+      const v = seName(nm.value);
+      if (!v || (findSe(v) && findSe(v) !== x)) { nm.value = x.name; setStatus("その名前は使えません(空または重複)。", true); return; }
+      const old = x.name; x.name = v; await sePut(x);
+      const n = renameSeInScripts(old, v);
+      renderChips(); if (n) setStatus(`台本の [${old}] を [${v}] に ${n}箇所置換しました。`);
+    };
+    const play = document.createElement("button"); play.type = "button"; play.textContent = "▶"; play.onclick = () => playSe(x);
+    const mv = (d, lab) => {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = lab;
+      b.disabled = i + d < 0 || i + d >= seItems.length;
+      b.onclick = async () => {
+        [seItems[i], seItems[i + d]] = [seItems[i + d], seItems[i]];
+        seItems.forEach((y, k) => (y.order = k));
+        for (const y of seItems) await sePut(y);
+        renderSeList(); renderChips();
+      };
+      return b;
+    };
+    const del = document.createElement("button"); del.type = "button"; del.textContent = "✕";
+    del.onclick = async () => {
+      if (!confirm(`効果音「${x.name}」を削除しますか?`)) return;
+      await seTx("readwrite", (st) => st.delete(x.id));
+      seItems.splice(i, 1); renderSeList(); renderChips(); updateInfo();
+    };
+    top.append(nm, play, mv(-1, "↑"), mv(1, "↓"));
+    if (!x.driveId) top.append(del);
+    else { const tg = document.createElement("span"); tg.className = "tag"; tg.textContent = "Drive"; tg.style.flex = "0 0 auto"; top.append(tg); }
+    const vl = document.createElement("label"); vl.textContent = `音量 ${Math.round(x.vol * 100)}%`;
+    const vol = document.createElement("input"); vol.type = "range"; vol.min = "0"; vol.max = "2"; vol.step = "0.05"; vol.value = x.vol;
+    vol.oninput = () => { x.vol = Number(vol.value); vl.textContent = `音量 ${Math.round(x.vol * 100)}%`; };
+    vol.onchange = () => sePut(x);
+    r.append(top, vl, vol);
+    box.appendChild(r);
+  });
+  if (!seItems.length) { const h = document.createElement("div"); h.className = "hint"; h.style.marginTop = "8px"; h.textContent = "まだ効果音がありません。"; box.appendChild(h); }
+}
+/* ---------- Google Drive フォルダから同期 ---------- */
+// フォルダを「リンクを知っている全員が閲覧可」にし、Drive API を有効にした API キーで読む
+const AUDIO_EXT = /\.(mp3|wav|m4a|aac|ogg|oga|opus|flac|webm|caf|aiff?)$/i;
+function parseFolderId(v) {
+  v = (v || "").trim();
+  const m = v.match(/\/folders\/([-\w]+)/) || v.match(/[?&]id=([-\w]+)/);
+  if (m) return m[1];
+  return /^[-\w]{10,}$/.test(v) ? v : "";
+}
+function driveInfo(msg, cls) { $("driveInfo").textContent = msg; $("driveInfo").className = "info" + (cls ? " " + cls : ""); }
+async function driveJson(url) {
+  const res = await fetch(url);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j.error && j.error.message) || `HTTP ${res.status}`);
+  return j;
+}
+let driveBusy = false;
+async function driveSync(quiet) {
+  const d = S().drive;
+  const fid = parseFolderId(d.folder);
+  if (!fid) { if (!quiet) driveInfo("フォルダのURLを入力してください。", "warn"); return; }
+  const key = d.key || S().apiKey;
+  if (!key) { if (!quiet) driveInfo("APIキーがありません。", "warn"); return; }
+  if (driveBusy) return;
+  driveBusy = true; $("btnDriveSync").disabled = true;
+  driveInfo("Driveを確認中…");
+  try {
+    const files = []; let token = "";
+    do {
+      const q = new URLSearchParams({
+        q: `'${fid}' in parents and trashed = false`,
+        fields: "nextPageToken,files(id,name,mimeType,modifiedTime,size)",
+        pageSize: "1000", key,
+      });
+      if (token) q.set("pageToken", token);
+      const j = await driveJson("https://www.googleapis.com/drive/v3/files?" + q);
+      files.push(...(j.files || []));
+      token = j.nextPageToken || "";
+    } while (token);
+    const audio = files.filter((f) => /^audio\//.test(f.mimeType || "") || AUDIO_EXT.test(f.name || ""));
+    const uniq = (name, self) => { let n = 2, base = name || "効果音", v = base; while (seItems.some((x) => x !== self && x.name.toLowerCase() === v.toLowerCase())) v = `${base}${n++}`; return v; };
+    let added = 0, updated = 0, removed = 0, renamed = 0, i = 0;
+    for (const f of audio) {
+      i++;
+      const ex = seItems.find((x) => x.driveId === f.id);
+      const nameFromDrive = seName(f.name.replace(/\.[^.]+$/, ""));
+      const needDl = !ex || ex.modifiedTime !== f.modifiedTime;
+      let blob = ex && ex.blob;
+      if (needDl) {
+        driveInfo(`ダウンロード中 ${i} / ${audio.length}: ${f.name}`);
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(f.id)}?alt=media&key=${encodeURIComponent(key)}`);
+        if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(`${f.name}: ` + ((j.error && j.error.message) || `HTTP ${res.status}`)); }
+        blob = await res.blob();
+      }
+      if (ex) {
+        let changed = false;
+        if (ex.driveName !== f.name) {
+          const nn = uniq(nameFromDrive, ex);
+          if (nn !== ex.name) { renameSeInScripts(ex.name, nn); ex.name = nn; renamed++; }
+          ex.driveName = f.name; changed = true;
+        }
+        if (needDl) {
+          ex.blob = blob; ex.modifiedTime = f.modifiedTime; updated++;
+          for (const k of [...seDecoded.keys()]) if (k.startsWith(ex.id + "@")) seDecoded.delete(k);
+        }
+        if (needDl || changed) await sePut(ex);
+      } else {
+        const item = { id: uid(), name: uniq(nameFromDrive), vol: 1, blob, order: Date.now() + i, driveId: f.id, driveName: f.name, modifiedTime: f.modifiedTime };
+        await sePut(item); seItems.push(item); added++;
+      }
+    }
+    const ids = new Set(audio.map((f) => f.id));
+    for (const x of seItems.filter((x) => x.driveId && !ids.has(x.driveId))) {
+      await seTx("readwrite", (st) => st.delete(x.id)); removed++;
+    }
+    seItems = seItems.filter((x) => !x.driveId || ids.has(x.driveId));
+    renderSeList(); renderChips(); updateInfo();
+    const parts = [];
+    if (added) parts.push(`追加 ${added}`); if (updated) parts.push(`更新 ${updated}`);
+    if (renamed) parts.push(`名前変更 ${renamed}`); if (removed) parts.push(`削除 ${removed}`);
+    const now = new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+    driveInfo(`${now} 同期済み(Driveの効果音 ${audio.length}件)` + (parts.length ? ` / ${parts.join("・")}` : ""), "ok");
+  } catch (err) {
+    driveInfo("Drive同期エラー: " + err.message, "warn");
+  } finally {
+    driveBusy = false; $("btnDriveSync").disabled = false;
+  }
+}
+$("btnDriveSync").onclick = () => driveSync(false);
+$("driveFolder").addEventListener("change", () => {
+  S().drive.folder = $("driveFolder").value.trim(); save();
+  if (!S().drive.folder) driveInfo("");
+  else if (!parseFolderId(S().drive.folder)) driveInfo("フォルダのURLを読み取れません。", "warn");
+  else driveSync(false);
+});
+$("driveKey").addEventListener("input", () => { S().drive.key = $("driveKey").value.trim(); save(); });
+$("driveAuto").addEventListener("change", () => { S().drive.auto = $("driveAuto").checked; save(); });
+$("driveFolder").value = S().drive.folder; $("driveKey").value = S().drive.key; $("driveAuto").checked = !!S().drive.auto;
+
+// 効果音を指定サンプルレートのモノラル Float32 に変換
+async function seSamples(item, rate) {
+  const key = `${item.id}@${rate}`;
+  if (seDecoded.has(key)) return seDecoded.get(key);
+  const buf = await item.blob.arrayBuffer();
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ac = new AC();
+  let decoded;
+  try { decoded = await new Promise((res, rej) => { const p = ac.decodeAudioData(buf, res, rej); if (p && p.then) p.then(res, rej); }); }
+  finally { if (ac.close) ac.close(); }
+  const len = Math.max(1, Math.ceil(decoded.duration * rate));
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const off = new OAC(1, len, rate);
+  const src = off.createBufferSource(); src.buffer = decoded; src.connect(off.destination); src.start();
+  const rendered = await new Promise((res, rej) => { off.oncomplete = (e) => res(e.renderedBuffer); const p = off.startRendering(); if (p && p.then) p.then(res, rej); });
+  const out = new Float32Array(rendered.getChannelData(0));
+  seDecoded.set(key, out);
+  return out;
+}
+const normTag = (v) => { v = v.trim(); if (!v) return ""; if (!/^<.*>$/.test(v)) v = "<" + v.replace(/^<|>$/g, "") + ">"; return v; };
+function renderTagList() {
+  const box = $("tagList"); box.innerHTML = "";
+  const tags = S().tags;
+  tags.forEach((t, i) => {
+    const r = document.createElement("div"); r.className = "tagrow";
+    const inp = document.createElement("input"); inp.type = "text"; inp.value = t;
+    inp.autocapitalize = "off"; inp.spellcheck = false; inp.setAttribute("enterkeyhint", "done");
+    inp.onchange = () => {
+      const v = normTag(inp.value);
+      if (!v) { tags.splice(i, 1); } else { tags[i] = v; }
+      save(); renderTagList(); renderChips();
+    };
+    inp.onkeydown = (ev) => { if (ev.key === "Enter") inp.blur(); };
+    const mv = (d, lab) => {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = lab;
+      b.disabled = i + d < 0 || i + d >= tags.length;
+      b.onclick = () => { [tags[i], tags[i + d]] = [tags[i + d], tags[i]]; save(); renderTagList(); renderChips(); };
+      return b;
+    };
+    const del = document.createElement("button"); del.type = "button"; del.textContent = "✕"; del.setAttribute("aria-label", "削除");
+    del.onclick = () => { tags.splice(i, 1); save(); renderTagList(); renderChips(); };
+    r.append(inp, mv(-1, "↑"), mv(1, "↓"), del);
+    box.appendChild(r);
+  });
+  if (!tags.length) { const h = document.createElement("div"); h.className = "hint"; h.textContent = "タグがありません。"; box.appendChild(h); }
+}
+function addTag() {
+  const v = normTag($("newTag").value);
+  if (!v) return;
+  if (!S().tags.includes(v)) S().tags.push(v);
+  $("newTag").value = ""; save(); renderTagList(); renderChips();
+}
+$("btnAddTag").onclick = addTag;
+$("newTag").addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); addTag(); } });
+$("btnTagRec").onclick = () => {
+  let n = 0; for (const t of RECOMMENDED_TAGS) if (!S().tags.includes(t)) { S().tags.push(t); n++; }
+  save(); renderTagList(); renderChips(); setStatus(`${n}個のタグを追加しました。`);
+};
+$("btnTagReset").onclick = () => {
+  if (!confirm("タグを初期値に戻しますか?")) return;
+  S().tags = DEFAULT_TAGS.slice(); save(); renderTagList(); renderChips();
+};
+
 function updateInfo() {
   const { entries, unknown } = parseScript(cur().text);
   const counts = S().speakers.map((sp, i) => `${sp.alias || "話者" + (i + 1)} ${entries.filter((e) => e.spk === i).length}行`);
-  let t = `${entries.length}行 / ${cur().text.length}文字 (${counts.join(" , ")})`;
+  const ses = entries.filter((e) => e.se != null);
   const el = $("info");
-  el.textContent = t;
+  el.textContent = `${entries.length - ses.length}セリフ / ${cur().text.length}文字 (${counts.join(" , ")})` + (ses.length ? ` / 効果音 ${ses.length}` : "");
   el.className = "info";
   if (unknown.length) {
     el.textContent += `\n未登録の話者名: ${unknown.join(", ")} → 直前のセリフの続きとして扱います`;
+    el.classList.add("warn");
+  }
+  const missSe = [...new Set(ses.filter((e) => !findSe(e.se)).map((e) => e.se))];
+  if (missSe.length) {
+    el.textContent += `\n未登録の効果音: ${missSe.join(", ")}`;
     el.classList.add("warn");
   }
 }
@@ -206,6 +594,14 @@ $("fileIn").addEventListener("change", async (e) => {
           for (const s of j.scripts) {
             if (s && typeof s.text === "string") { state.scripts.push({ id: uid(), name: String(s.name || base), text: s.text }); added++; }
           }
+          if (Array.isArray(j.speakers) && j.speakers.length && confirm("バックアップの話者設定も復元しますか?")) {
+            S().speakers = j.speakers.map((sp) => ({ alias: String(sp.alias || ""), voice: String(sp.voice || ""), style: String(sp.style || "") }));
+            renderSpeakers();
+          }
+          if (Array.isArray(j.tags) && confirm("バックアップの表現タグも復元しますか?")) {
+            S().tags = j.tags.map((t) => normTag(String(t))).filter(Boolean);
+            renderTagList(); renderChips();
+          }
           handled = true;
         }
       } catch (err) {}
@@ -224,28 +620,165 @@ function download(blob, name) {
 const safeName = (s) => s.replace(/[\\/:*?"<>|]/g, "_");
 $("btnExport").onclick = () => download(new Blob([cur().text], { type: "text/plain;charset=utf-8" }), safeName(cur().name) + ".txt");
 $("btnBackup").onclick = () => {
-  const data = { scripts: state.scripts.map(({ name, text }) => ({ name, text })) };
+  const data = { scripts: state.scripts.map(({ name, text }) => ({ name, text })), speakers: S().speakers, tags: S().tags };
   download(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), "tts-scripts-backup.json");
 };
 
-/* ---------- 設定UI ---------- */
+/* ---------- 声の一覧 ---------- */
+const isCustom = (id) => /^voice(key)?_/.test(id || "") || !!S().voiceCache.find((v) => v.id === id && v.custom);
+function voiceLabel(id) {
+  const v = S().voiceCache.find((x) => x.id === id);
+  return v ? v.label : id;
+}
+async function fetchVoices() {
+  const s = S();
+  if (!s.apiKey) { $("dApi").open = true; setStatus("先にAPIキーを入力してください。", true); return; }
+  const btn = $("btnVoices"); btn.disabled = true;
+  $("voiceInfo").textContent = "取得中…"; $("voiceInfo").className = "info";
+  try {
+    const out = [];
+    // プリセット非表示時はカスタム声だけを取得(プリセットは1000件以上あるため)
+    const types = s.showPresets ? [""] : ["prompted", "replicated"];
+    for (const type of types) {
+    let token = "";
+    for (let page = 0; page < 20; page++) {
+      const q = new URLSearchParams({ pageSize: "100" });
+      if (type) q.set("type", type);
+      if (token) q.set("pageToken", token);
+      const res = await fetch("https://generativelanguage.googleapis.com/v1beta/voices?" + q, { headers: { "x-goog-api-key": s.apiKey } });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((j.error && j.error.message) || `HTTP ${res.status}`);
+      for (const v of j.voices || []) {
+        const id = v.id || (v.name || "").split("/").pop();
+        if (!id || out.find((x) => x.id === id)) continue;
+        const type = String(v.type || "").toLowerCase();
+        const custom = /prompt|replic/.test(type) || /^voice(key)?_/.test(id);
+        const dn = v.displayName || v.display_name || "";
+        const extra = [v.gender, v.pitch, v.languageCode || v.language_code].filter(Boolean).join(" / ");
+        out.push({ id, custom, name: dn || id, label: (dn ? dn : id) + (extra ? ` (${extra})` : ""), desc: v.description || "" });
+      }
+      token = j.nextPageToken || j.next_page_token || "";
+      if (!token) break;
+    }
+    }
+    s.voiceCache = s.showPresets ? out : out.filter((v) => v.custom);
+    save(); renderSpeakers();
+    const nc = s.voiceCache.filter((v) => v.custom).length;
+    $("voiceInfo").textContent = s.showPresets
+      ? `カスタム ${nc}件 / プリセット ${s.voiceCache.length - nc}件を取得しました。`
+      : `カスタム ${nc}件を取得しました。`;
+    $("voiceInfo").className = "info ok";
+  } catch (err) {
+    $("voiceInfo").textContent = "取得エラー: " + err.message; $("voiceInfo").className = "info warn";
+  } finally { btn.disabled = false; }
+}
+$("btnVoices").onclick = fetchVoices;
+
+/* ---------- 話者UI ---------- */
+function renderSpeakers() {
+  const box = $("spkList"); box.innerHTML = "";
+  const cache = S().voiceCache;
+  S().speakers.forEach((sp, i) => {
+    const d = document.createElement("div"); d.className = "spk";
+    const head = document.createElement("div"); head.className = "spk-head";
+    const ttl = document.createElement("span"); ttl.textContent = `話者${i + 1}`;
+    const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = isCustom(sp.voice) ? "カスタム" : "プリセット"; ttl.appendChild(tag);
+    const del = document.createElement("button"); del.className = "small"; del.textContent = "削除";
+    del.disabled = S().speakers.length <= 1;
+    del.onclick = () => { if (!confirm(`話者${i + 1}を削除しますか?`)) return; S().speakers.splice(i, 1); save(); renderSpeakers(); updateInfo(); };
+    head.append(ttl, del);
+
+    const mk = (lab, el) => { const l = document.createElement("label"); l.textContent = lab; d.append(l, el); return el; };
+    const alias = document.createElement("input"); alias.type = "text"; alias.value = sp.alias; alias.placeholder = "例: Fola";
+    let aliasBefore = sp.alias;
+    alias.onfocus = () => { aliasBefore = sp.alias; };
+    alias.oninput = () => { sp.alias = alias.value.trim(); save(); updateInfo(); renderChips(); };
+    alias.onchange = () => { renameAlias(aliasBefore, sp.alias, i); aliasBefore = sp.alias; };
+    alias.onkeydown = (ev) => { if (ev.key === "Enter") alias.blur(); };
+    alias.setAttribute("enterkeyhint", "done");
+
+    const sel = document.createElement("select");
+    const addOpt = (parent, v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; parent.appendChild(o); return o; };
+    addOpt(sel, "", "— 声を選択 —");
+    const customs = cache.filter((v) => v.custom), presets = cache.filter((v) => !v.custom);
+    if (customs.length) { const g = document.createElement("optgroup"); g.label = "カスタム(自分で作成)"; customs.forEach((v) => addOpt(g, v.id, v.label)); sel.appendChild(g); }
+    if (S().showPresets && presets.length) { const g = document.createElement("optgroup"); g.label = "プリセット"; presets.forEach((v) => addOpt(g, v.id, v.label)); sel.appendChild(g); }
+    const inList = cache.find((v) => v.id === sp.voice && (v.custom || S().showPresets));
+    if (sp.voice && !inList) addOpt(sel, sp.voice, `${sp.voice}(現在の設定)`);
+    sel.value = sp.voice || "";
+
+    const manual = document.createElement("input"); manual.type = "text"; manual.value = sp.voice; manual.placeholder = "voice_… または Kore など";
+    manual.autocapitalize = "off"; manual.spellcheck = false;
+    const desc = document.createElement("div"); desc.className = "hint";
+    const showDesc = () => { const v = cache.find((x) => x.id === sp.voice); desc.textContent = v && v.desc ? v.desc : ""; };
+    const setVoice = (val, fromSel) => {
+      sp.voice = val.trim();
+      if (fromSel) manual.value = sp.voice;
+      const v = cache.find((x) => x.id === sp.voice);
+      if (fromSel && v && !sp.alias) { sp.alias = v.name; alias.value = v.name; renderChips(); }
+      tag.textContent = isCustom(sp.voice) ? "カスタム" : "プリセット";
+      showDesc(); save(); updateInfo();
+    };
+    sel.onchange = () => setVoice(sel.value, true);
+    manual.onchange = () => { setVoice(manual.value, false); renderSpeakers(); };
+
+    const style = document.createElement("input"); style.type = "text"; style.value = sp.style || ""; style.placeholder = "例: 明るく元気に(空欄可)";
+    style.oninput = () => { sp.style = style.value.trim(); save(); };
+
+    d.appendChild(head);
+    mk("台本上の名前", alias);
+    mk("声", sel);
+    d.appendChild(desc);
+    mk("声ID(直接入力)", manual);
+    mk("話し方(style・任意)", style);
+    box.appendChild(d);
+    showDesc();
+  });
+  if (!cache.length) $("voiceInfo").textContent = "「声の一覧を取得」を押すと、作成したカスタム声から選べます。";
+  renderChips();
+}
+$("showPresets").addEventListener("change", (e) => {
+  S().showPresets = e.target.checked;
+  if (!S().showPresets) S().voiceCache = S().voiceCache.filter((v) => v.custom);
+  save(); renderSpeakers();
+  if (S().showPresets && !S().voiceCache.some((v) => !v.custom)) {
+    $("voiceInfo").textContent = "「声の一覧を取得」を押すとプリセットも読み込みます。"; $("voiceInfo").className = "info";
+  }
+});
+// 話者名を変えたら、台本中の「旧名:」も「新名:」に置換
+function renameAlias(oldName, newName, idx) {
+  if (!oldName || !newName || oldName === newName) return;
+  if (S().speakers.some((sp, j) => j !== idx && (sp.alias || "").toLowerCase() === newName.toLowerCase())) {
+    setStatus(`「${newName}」は他の話者と同じ名前です。台本は置換しませんでした。`, true); return;
+  }
+  const esc = oldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = () => new RegExp(`^([ \\t]*)${esc}([ \\t]*[:：])`, "gim");
+  const count = (t) => (t.match(re()) || []).length;
+  const rep = (t) => t.replace(re(), (m, a, b) => a + newName + b);
+  const n = count(cur().text);
+  if (n) { cur().text = rep(cur().text); $("text").value = cur().text; }
+  const others = state.scripts.filter((sc) => sc.id !== state.current && count(sc.text));
+  let no = 0;
+  if (others.length && confirm(`他の台本 ${others.length}件にも「${oldName}:」があります。置換しますか?`)) {
+    for (const sc of others) { no += count(sc.text); sc.text = rep(sc.text); }
+  }
+  save(); updateInfo();
+  if (n || no) setStatus(`「${oldName}:」→「${newName}:」に ${n + no}箇所置換しました。`);
+}
+$("btnAddSpk").onclick = () => { S().speakers.push({ alias: "", voice: "", style: "" }); save(); renderSpeakers(); };
+
 function renderSettings() {
   const s = S();
-  $("a0").value = s.speakers[0].alias; $("v0").value = s.speakers[0].voice;
-  $("a1").value = s.speakers[1].alias; $("v1").value = s.speakers[1].voice;
   $("model").value = s.model; $("mode").value = s.mode; $("temp").value = s.temperature;
-  $("apiKey").value = s.apiKey; $("chunk").value = s.chunk; $("gap").value = s.gap;
+  $("apiKey").value = s.apiKey; $("gap").value = s.gap;
+  $("showPresets").checked = !!s.showPresets;
+  renderSpeakers();
 }
-function bind(id, fn) { $(id).addEventListener("input", () => { fn($(id).value); save(); updateInfo(); }); }
-bind("a0", (v) => (S().speakers[0].alias = v.trim()));
-bind("v0", (v) => (S().speakers[0].voice = v.trim()));
-bind("a1", (v) => (S().speakers[1].alias = v.trim()));
-bind("v1", (v) => (S().speakers[1].voice = v.trim()));
+function bind(id, fn) { $(id).addEventListener("input", () => { fn($(id).value); save(); }); }
 bind("model", (v) => (S().model = v.trim()));
 bind("mode", (v) => (S().mode = v.trim()));
 bind("temp", (v) => (S().temperature = v === "" ? 1 : Number(v)));
 bind("apiKey", (v) => (S().apiKey = v.trim()));
-bind("chunk", (v) => (S().chunk = Math.max(0, parseInt(v || "0", 10) || 0)));
 bind("gap", (v) => (S().gap = Math.max(0, Number(v) || 0)));
 
 /* ---------- 台本パース ---------- */
@@ -253,18 +786,75 @@ function parseScript(text) {
   const names = S().speakers.map((s) => (s.alias || "").toLowerCase());
   const entries = [];
   const unknown = new Set();
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
+  const lines = text.split(/\r?\n/);
+  for (let ln = 0; ln < lines.length; ln++) {
+    const line = lines[ln].trim();
     if (!line || line.startsWith("#") || line.startsWith("//")) continue;
+    const se = line.match(/^\[([^\]:：]+?)\s*(?:[:：]\s*([-+]?\d*\.?\d+)\s*)?\]$/);
+    if (se) { entries.push({ se: se[1].trim(), offset: se[2] != null ? parseFloat(se[2]) : null, line: ln, endLine: ln }); continue; }
     const m = line.match(/^([^:：\s][^:：]{0,24}?)\s*[:：]\s*(.*)$/);
     if (m) {
       const idx = names.indexOf(m[1].trim().toLowerCase());
-      if (idx >= 0) { entries.push({ spk: idx, text: m[2] }); continue; }
+      if (idx >= 0 && names[idx]) { entries.push({ spk: idx, text: m[2], line: ln, endLine: ln }); continue; }
       if (!/^<|^\(/.test(m[1]) && m[1].length <= 12 && !/[。、！？!?.,]/.test(m[1])) unknown.add(m[1].trim());
     }
-    if (entries.length) entries[entries.length - 1].text += "\n" + line;
+    const last = entries[entries.length - 1];
+    if (last && last.se == null) { last.text += "\n" + line; last.endLine = ln; }
   }
   return { entries, unknown: Array.from(unknown) };
+}
+
+/* ---------- 生成単位への分割 ---------- */
+// カスタム声: 同じ話者の連続行を1リクエスト(単独話者)
+// プリセット声: 最大2話者までまとめて1リクエスト(複数話者)
+function segmentEntries(entries) {
+  const s = S();
+  const size = Infinity;
+  const segs = [];
+  let c = null;
+  for (const e of entries) {
+    if (e.se != null) { c = { se: e }; segs.push(c); continue; }
+    const custom = isCustom(s.speakers[e.spk].voice);
+    if (custom) {
+      if (c && !c.se && c.custom && c.spks[0] === e.spk && c.entries.length < size) c.entries.push(e);
+      else { c = { custom: true, spks: [e.spk], entries: [e] }; segs.push(c); }
+    } else {
+      if (c && !c.se && !c.custom && c.entries.length < size && (c.spks.includes(e.spk) || c.spks.length < 2)) {
+        c.entries.push(e); if (!c.spks.includes(e.spk)) c.spks.push(e.spk);
+      } else { c = { custom: false, spks: [e.spk], entries: [e] }; segs.push(c); }
+    }
+  }
+  return segs;
+}
+function voiceConfigFor(id) {
+  return isCustom(id) ? { voice: id } : { prebuiltVoiceConfig: { voiceName: id } };
+}
+function buildBody(seg) {
+  const s = S();
+  const generationConfig = { temperature: s.temperature, responseModalities: ["AUDIO"] };
+  let parts;
+  if (seg.spks.length >= 2) {
+    parts = seg.entries.map((e) => {
+      const md = { speaker: `Speaker ${e.spk + 1}` };
+      if (s.speakers[e.spk].style) md.style = s.speakers[e.spk].style;
+      return { text: e.text, speech_metadata: md };
+    });
+    const mv = {
+      speakerVoiceConfigs: seg.spks.map((i) => ({
+        speaker: `Speaker ${i + 1}`,
+        voiceConfig: { prebuiltVoiceConfig: { voiceName: s.speakers[i].voice } },
+      })),
+    };
+    if (s.mode) mv.mode = s.mode;
+    generationConfig.speechConfig = { multiSpeakerVoiceConfig: mv };
+  } else {
+    const sp = s.speakers[seg.spks[0]];
+    const part = { text: seg.entries.map((e) => e.text).join("\n") };
+    if (sp.style) part.speech_metadata = { style: sp.style };
+    parts = [part];
+    generationConfig.speechConfig = { voiceConfig: voiceConfigFor(sp.voice) };
+  }
+  return { contents: [{ role: "user", parts }], generationConfig };
 }
 
 /* ---------- 音声処理 ---------- */
@@ -281,8 +871,9 @@ function concatBytes(arrs) {
   for (const a of arrs) { out.set(a, o); o += a.length; }
   return out;
 }
-function makeWav(pcm, rate, bits) {
-  const ch = 1, byteRate = (rate * ch * bits) / 8, block = (ch * bits) / 8;
+function makeWav(pcm, rate, bits, ch) {
+  ch = ch || 1;
+  const byteRate = (rate * ch * bits) / 8, block = (ch * bits) / 8;
   const buf = new ArrayBuffer(44 + pcm.length);
   const v = new DataView(buf);
   const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
@@ -293,10 +884,30 @@ function makeWav(pcm, rate, bits) {
   new Uint8Array(buf, 44).set(pcm);
   return new Blob([buf], { type: "audio/wav" });
 }
-function parseMime(mime) {
-  const rate = (mime.match(/rate=(\d+)/) || [])[1];
-  const bits = (mime.match(/audio\/L(\d+)/i) || [])[1];
-  return { rate: rate ? parseInt(rate, 10) : 24000, bits: bits ? parseInt(bits, 10) : 16, isPcm: !!bits || /pcm/i.test(mime) };
+// 返ってきた音声を {pcm, rate, bits, ch} に。WAV(RIFF)ならヘッダを外す。結合できない形式なら null
+function toPcm(bytes, mime) {
+  mime = mime || "";
+  const str = (o) => String.fromCharCode(bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]);
+  if (bytes.length >= 12 && str(0) === "RIFF" && str(8) === "WAVE") {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let pos = 12, rate = 24000, bits = 16, ch = 1;
+    while (pos + 8 <= bytes.length) {
+      const id = str(pos), size = dv.getUint32(pos + 4, true);
+      if (id === "fmt ") { ch = dv.getUint16(pos + 10, true); rate = dv.getUint32(pos + 12, true); bits = dv.getUint16(pos + 22, true); }
+      if (id === "data") {
+        const end = Math.min(bytes.length, pos + 8 + size);
+        return { pcm: bytes.subarray(pos + 8, end), rate, bits, ch };
+      }
+      pos += 8 + size + (size & 1);
+    }
+    return null;
+  }
+  const bitsM = mime.match(/audio\/L(\d+)/i);
+  if (bitsM || /pcm/i.test(mime)) {
+    const rate = (mime.match(/rate=(\d+)/) || [])[1];
+    return { pcm: bytes, rate: rate ? parseInt(rate, 10) : 24000, bits: bitsM ? parseInt(bitsM[1], 10) : 16, ch: 1 };
+  }
+  return null;
 }
 
 /* ---------- 生成 ---------- */
@@ -304,40 +915,23 @@ let abortCtl = null;
 function setStatus(msg, isErr) {
   const el = $("status"); el.textContent = msg; el.className = "info" + (isErr ? " warn" : "");
 }
-function buildBody(chunkEntries) {
-  const s = S();
-  const used = new Set(chunkEntries.map((e) => e.spk));
-  const generationConfig = { temperature: s.temperature, responseModalities: ["AUDIO"] };
-  let text, parts;
-  if (used.size >= 2) {
-    parts = chunkEntries.map((e) => ({ text: e.text, speech_metadata: { speaker: `Speaker ${e.spk + 1}` } }));
-    const mv = {
-      speakerVoiceConfigs: s.speakers.map((sp, i) => ({
-        speaker: `Speaker ${i + 1}`,
-        voiceConfig: { prebuiltVoiceConfig: { voiceName: sp.voice } },
-      })),
-    };
-    if (s.mode) mv.mode = s.mode;
-    generationConfig.speechConfig = { multiSpeakerVoiceConfig: mv };
-  } else {
-    const spk = chunkEntries[0].spk;
-    text = chunkEntries.map((e) => e.text).join("\n");
-    parts = [{ text }];
-    generationConfig.speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName: s.speakers[spk].voice } } };
-  }
-  return { contents: [{ role: "user", parts }], generationConfig };
-}
+const sleep = (ms, signal) => new Promise((r, j) => {
+  const t = setTimeout(r, ms);
+  if (signal) signal.addEventListener("abort", () => { clearTimeout(t); j(new DOMException("aborted", "AbortError")); }, { once: true });
+});
 async function callApi(body, signal) {
   const s = S();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model)}:generateContent`;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const waits = [4000, 10000, 20000];
+  for (let attempt = 0; ; attempt++) {
     const res = await fetch(url, {
       method: "POST", signal,
       headers: { "Content-Type": "application/json", "x-goog-api-key": s.apiKey },
       body: JSON.stringify(body),
     });
-    if ((res.status === 429 || res.status >= 500) && attempt === 0) {
-      await new Promise((r) => setTimeout(r, 3000)); continue;
+    if ((res.status === 429 || res.status >= 500) && attempt < waits.length) {
+      setStatus($("status").textContent.split("\n")[0] + `\n混雑のため ${waits[attempt] / 1000}秒待って再試行します…`);
+      await sleep(waits[attempt], signal); continue;
     }
     const j = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error((j.error && j.error.message) || `HTTP ${res.status}`);
@@ -347,66 +941,189 @@ async function callApi(body, signal) {
     return audio.map((p) => p.inlineData);
   }
 }
-function addResult(title, preview, blob, fname) {
+function addResult(parent, title, preview, blob, fname) {
   const d = document.createElement("div"); d.className = "res";
   const h = document.createElement("div"); h.textContent = title; h.style.fontWeight = "600";
-  const t = document.createElement("div"); t.className = "t"; t.textContent = preview;
-  const a = document.createElement("audio"); a.controls = true; a.src = URL.createObjectURL(blob);
+  const a = document.createElement("audio"); a.controls = true; a.preload = "metadata"; a.src = URL.createObjectURL(blob);
   const b = document.createElement("button"); b.textContent = "保存 (" + fname + ")"; b.onclick = () => download(blob, fname);
-  d.append(h, t, a, b);
-  $("results").appendChild(d);
+  d.append(h);
+  if (preview) { const t = document.createElement("div"); t.className = "t"; t.textContent = preview; d.append(t); }
+  d.append(a, b);
+  parent.appendChild(d);
 }
-$("btnGen").onclick = async () => {
+function validateBeforeGen(entries) {
   const s = S();
-  if (!s.apiKey) { $("dApi").open = true; setStatus("APIキーを入力してください。", true); return; }
-  if (!s.speakers[0].voice || !s.speakers[1].voice) { $("dVoice").open = true; setStatus("voiceNameを入力してください。", true); return; }
-  const { entries } = parseScript(cur().text);
-  if (!entries.length) { setStatus("セリフがありません。「話者名: セリフ」の形式で書いてください。", true); return; }
-  const size = s.chunk > 0 ? s.chunk : entries.length;
-  const chunks = [];
-  for (let i = 0; i < entries.length; i += size) chunks.push(entries.slice(i, i + size));
-
-  $("results").innerHTML = "";
-  $("btnGen").disabled = true; $("btnStop").disabled = false;
-  abortCtl = new AbortController();
-  const base = safeName(cur().name);
-  const pcms = []; let rate = 24000, bits = 16, canJoin = true;
-  try {
-    for (let i = 0; i < chunks.length; i++) {
-      setStatus(`生成中 ${i + 1} / ${chunks.length}`);
-      const parts = await callApi(buildBody(chunks[i]), abortCtl.signal);
-      const mimes = parts.map((p) => parseMime(p.mimeType || ""));
-      const preview = chunks[i].map((e) => `${s.speakers[e.spk].alias}: ${e.text}`).join("\n");
-      const no = String(i + 1).padStart(2, "0");
-      if (mimes.every((m) => m.isPcm)) {
-        rate = mimes[0].rate; bits = mimes[0].bits;
-        const pcm = concatBytes(parts.map((p) => b64ToBytes(p.data)));
-        pcms.push(pcm);
-        addResult(`パート ${i + 1}`, preview, makeWav(pcm, rate, bits), `${base}_${no}.wav`);
-      } else {
-        canJoin = false;
-        const p = parts[0], ext = (p.mimeType || "audio/wav").split("/")[1].split(";")[0] || "wav";
-        addResult(`パート ${i + 1}`, preview, new Blob([b64ToBytes(p.data)], { type: p.mimeType }), `${base}_${no}.${ext}`);
+  if (!entries.length) return "セリフがありません。「話者名: セリフ」の形式で書いてください。";
+  const missSe = [...new Set(entries.filter((e) => e.se != null && !findSe(e.se)).map((e) => e.se))];
+  if (missSe.length) { $("dSe").open = true; return `未登録の効果音があります: ${missSe.join(", ")}`; }
+  const speech = entries.filter((e) => e.se == null);
+  if (speech.length && !s.apiKey) { $("dApi").open = true; return "APIキーを入力してください。"; }
+  const missing = [...new Set(speech.map((e) => e.spk))].filter((i) => !s.speakers[i].voice);
+  if (missing.length) { $("dVoice").open = true; return `声が未設定の話者があります: ${missing.map((i) => s.speakers[i].alias).join(", ")}`; }
+  return "";
+}
+function setBusy(b) {
+  $("btnGen").disabled = b; $("btnGenLine").disabled = b; $("btnStop").disabled = !b;
+  document.querySelectorAll(".chip.gen-c").forEach((x) => (x.disabled = b));
+}
+// entries を生成し、結合済みの {blob, fname} と個別パートを返す。progress(msg) で進捗通知
+async function synthesize(entries, base, progress, onPart) {
+  const s = S();
+  const segs = segmentEntries(entries);
+  const nSpeech = segs.filter((g) => !g.se).length;
+  // 1) 各セリフ区間を生成して PCM16 を集める
+  const clips = []; let fmt = null, canJoin = true, k = 0, lastPart = null;
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i];
+    if (seg.se) { clips.push({ se: seg.se }); continue; }
+    k++;
+    const who = seg.spks.map((x) => s.speakers[x].alias).join(" & ");
+    progress(nSpeech > 1 ? `生成中 ${k} / ${nSpeech}(${who})` : `生成中(${who})`);
+    const datas = await callApi(buildBody(seg), abortCtl.signal);
+    const preview = seg.entries.map((e) => `${s.speakers[e.spk].alias}: ${e.text}`).join("\n");
+    const no = String(k).padStart(2, "0");
+    const decoded = datas.map((d) => ({ raw: b64ToBytes(d.data), mime: d.mimeType || "" })).map((x) => Object.assign(x, { p: toPcm(x.raw, x.mime) }));
+    let blob, fname;
+    if (decoded.every((x) => x.p)) {
+      const f = decoded[0].p;
+      const pcm = concatBytes(decoded.map((x) => x.p.pcm));
+      if (!fmt) fmt = f;
+      else if (fmt.rate !== f.rate || fmt.bits !== f.bits || fmt.ch !== f.ch) canJoin = false;
+      if (f.bits !== 16 || f.ch !== 1) canJoin = false;
+      clips.push({ pcm });
+      blob = makeWav(pcm, f.rate, f.bits, f.ch); fname = `${base}_${no}.wav`;
+    } else {
+      canJoin = false;
+      const x = decoded[0], ext = (x.mime.split("/")[1] || "bin").split(";")[0];
+      blob = new Blob([x.raw], { type: x.mime }); fname = `${base}_${no}.${ext}`;
+    }
+    lastPart = { blob, fname };
+    if (onPart) onPart(k - 1, nSpeech, who, preview, blob, fname);
+  }
+  // 効果音なし・1区間ならそのまま返す
+  if (segs.length === 1 && lastPart) return { blob: lastPart.blob, fname: `${base}.${lastPart.fname.split(".").pop()}`, joined: true };
+  if (!canJoin) return { joined: false };
+  // 2) タイムライン上に並べてミックス
+  const rate = fmt ? fmt.rate : 24000;
+  progress("結合中…");
+  const gap = Math.round(s.gap * rate);
+  const placed = []; let lastEnd = null, total = 0;
+  for (const c of clips) {
+    let data, vol = 1, start;
+    if (c.se) {
+      const item = findSe(c.se.se);
+      if (!item) throw new Error(`効果音「${c.se.se}」が見つかりません`);
+      data = await seSamples(item, rate); vol = item.vol;
+      if (c.se.offset != null) {
+        // 重ねる: 直前の音の終わり + offset 秒から鳴らし、タイムラインは進めない
+        start = Math.max(0, (lastEnd || 0) + Math.round(c.se.offset * rate));
+        placed.push({ data, vol, start, f32: true });
+        total = Math.max(total, start + data.length);
+        continue;
       }
+      start = lastEnd == null ? 0 : lastEnd + gap;
+      placed.push({ data, vol, start, f32: true });
+    } else {
+      const n = c.pcm.length >> 1;
+      data = new Int16Array(c.pcm.buffer.slice(c.pcm.byteOffset, c.pcm.byteOffset + n * 2));
+      start = lastEnd == null ? 0 : lastEnd + gap;
+      placed.push({ data, vol, start, f32: false });
     }
-    if (pcms.length > 1 && canJoin) {
-      const gapBytes = new Uint8Array(Math.round(s.gap * rate) * (bits / 8));
-      const all = [];
-      pcms.forEach((p, i) => { if (i) all.push(gapBytes); all.push(p); });
-      addResult("全パート結合", "", makeWav(concatBytes(all), rate, bits), `${base}_all.wav`);
-    }
-    setStatus("完了しました。", false); $("status").classList.add("ok");
+    lastEnd = start + data.length;
+    total = Math.max(total, lastEnd);
+  }
+  const mix = new Float32Array(total);
+  for (const p of placed) {
+    const d = p.data, sc = p.f32 ? p.vol : p.vol / 32768;
+    for (let j = 0; j < d.length; j++) mix[p.start + j] += d[j] * sc;
+  }
+  const out = new Int16Array(total);
+  for (let j = 0; j < total; j++) { const v = Math.max(-1, Math.min(1, mix[j])); out[j] = v < 0 ? v * 32768 : v * 32767; }
+  return { blob: makeWav(new Uint8Array(out.buffer), rate, 16, 1), fname: `${base}.wav`, joined: true };
+}
+
+$("btnGen").onclick = async () => {
+  const { entries } = parseScript(cur().text);
+  const err = validateBeforeGen(entries);
+  if (err) { setStatus(err, true); return; }
+  const segCount = segmentEntries(entries).filter((g) => !g.se).length;
+  $("results").innerHTML = "";
+  const top = document.createElement("div"); $("results").appendChild(top);
+  const det = document.createElement("details"); det.className = "parts";
+  const sum = document.createElement("summary"); sum.textContent = "個別パート"; det.appendChild(sum);
+  const partBox = document.createElement("div"); det.appendChild(partBox);
+  if (segCount > 1) $("results").appendChild(det);
+
+  setBusy(true);
+  abortCtl = new AbortController();
+  try {
+    const r = await synthesize(entries, safeName(cur().name), (m) => setStatus(m), (i, n, who, preview, blob, fname) => {
+      if (n > 1) { addResult(partBox, `パート ${i + 1}(${who})`, preview, blob, fname); sum.textContent = `個別パート(${i + 1}件)`; }
+    });
+    if (r.joined) addResult(top, "完成版", "", r.blob, r.fname);
+    setStatus(r.joined ? "完了しました。" : "完了しました(形式が揃わないため結合はできませんでした)。");
+    $("status").classList.add("ok");
   } catch (err) {
     if (err.name === "AbortError") setStatus("停止しました。");
     else setStatus("エラー: " + err.message, true);
   } finally {
-    $("btnGen").disabled = false; $("btnStop").disabled = true; abortCtl = null;
+    setBusy(false); abortCtl = null;
   }
 };
+
+/* ---------- カーソル行だけ生成 ---------- */
+function entryAtCursor() {
+  const { entries } = parseScript(cur().text);
+  const pos = sel.s == null ? 0 : Math.min(sel.s, ta.value.length);
+  const line = ta.value.slice(0, pos).split("\n").length - 1;
+  let hit = entries.find((e) => line >= e.line && line <= e.endLine);
+  if (!hit) hit = entries.filter((e) => e.line <= line).pop() || entries[0];
+  return hit ? [hit] : [];
+}
+function miniShow(msg, isErr) {
+  $("mini").hidden = false;
+  $("miniStatus").textContent = msg;
+  $("miniStatus").className = "info" + (isErr ? " warn" : "");
+}
+$("miniClose").onclick = () => { if (abortCtl) abortCtl.abort(); $("mini").hidden = true; $("miniBody").innerHTML = ""; };
+async function generateCurrentLine() {
+  const entries = entryAtCursor();
+  const err = validateBeforeGen(entries);
+  if (err) { miniShow(err, true); return; }
+  const e = entries[0];
+  if (e.se != null) { const it = findSe(e.se); miniShow(`${e.line + 1}行目 効果音: ${e.se}`); playSe(it); return; }
+  const sp = S().speakers[e.spk];
+  $("miniBody").innerHTML = "";
+  setBusy(true);
+  abortCtl = new AbortController();
+  try {
+    const head = `${e.line + 1}行目 ${sp.alias}`;
+    const r = await synthesize(entries, `${safeName(cur().name)}_L${e.line + 1}`, (m) => miniShow(`${head}: ${m}`));
+    miniShow(`${head}: ${e.text.replace(/\n/g, " ").slice(0, 40)}`);
+    const a = document.createElement("audio"); a.controls = true; a.src = URL.createObjectURL(r.blob);
+    const row = document.createElement("div"); row.className = "row";
+    const regen = document.createElement("button"); regen.type = "button"; regen.className = "small"; regen.textContent = "↻ 再生成";
+    regen.onclick = generateCurrentLine;
+    const sv = document.createElement("button"); sv.type = "button"; sv.className = "small"; sv.textContent = "保存";
+    sv.onclick = () => download(r.blob, r.fname);
+    row.append(regen, sv);
+    $("miniBody").append(a, row);
+    a.play().catch(() => {});
+  } catch (err) {
+    if (err.name === "AbortError") miniShow("停止しました。");
+    else miniShow("エラー: " + err.message, true);
+  } finally {
+    setBusy(false); abortCtl = null;
+  }
+}
+$("btnGenLine").onclick = generateCurrentLine;
 $("btnStop").onclick = () => { if (abortCtl) abortCtl.abort(); };
 
 renderSettings();
+renderTagList();
+renderChips();
 renderSelect();
+seLoad().then(() => { if (S().drive.auto && S().drive.folder) driveSync(true); });
 </script>
 </body>
 </html>
