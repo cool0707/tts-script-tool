@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>TTS台本ツール</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1c1f23;--sub:#6a7280;--line:#dde1e7;--acc:#1a73e8;--accfg:#fff;--warn:#b3261e;--ok:#188038}
+@media (prefers-color-scheme:dark){:root{--bg:#14161a;--card:#1e2126;--fg:#e8eaed;--sub:#9aa0a6;--line:#343942;--acc:#8ab4f8;--accfg:#10223d;--warn:#f28b82;--ok:#81c995}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;padding:0 16px calc(40px + env(safe-area-inset-bottom))}
+h1{font-size:18px;margin:0;padding:14px 0 6px}
+section,details{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:12px 0}
+summary{font-weight:600;cursor:pointer;min-height:28px}
+label{display:block;font-size:13px;color:var(--sub);margin:10px 0 4px}
+input,select,textarea,button{font:inherit;color:var(--fg)}
+input[type=text],input[type=password],input[type=number],select,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+textarea{min-height:42vh;resize:vertical;line-height:1.6}
+button{min-height:44px;padding:8px 14px;border:1px solid var(--line);border-radius:8px;background:var(--card);cursor:pointer}
+button.primary{background:var(--acc);color:var(--accfg);border-color:var(--acc);font-weight:600}
+button:disabled{opacity:.5}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.row>*{flex:1 1 auto}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.info{font-size:13px;color:var(--sub);margin-top:6px;white-space:pre-wrap}
+.warn{color:var(--warn)}
+.ok{color:var(--ok)}
+.res{border-top:1px solid var(--line);padding:10px 0}
+.res:first-child{border-top:0}
+.res audio{width:100%;margin:6px 0}
+.res .t{font-size:13px;color:var(--sub);white-space:pre-wrap;max-height:4.8em;overflow:hidden}
+input[type=file]{display:none}
+.hint{font-size:12px;color:var(--sub)}
+</style>
+</head>
+<body>
+<h1>TTS 台本ツール</h1>
+
+<section>
+  <label for="scriptSel" style="margin-top:0">台本</label>
+  <select id="scriptSel"></select>
+  <div class="row">
+    <button id="btnNew">新規</button>
+    <button id="btnRename">名前変更</button>
+    <button id="btnDup">複製</button>
+    <button id="btnDel">削除</button>
+  </div>
+  <div class="row">
+    <button id="btnImport">ファイルから読み込み</button>
+    <button id="btnExport">この台本を書き出し(.txt)</button>
+  </div>
+  <input type="file" id="fileIn" multiple accept=".txt,.md,.json,text/plain,application/json">
+  <label for="text">セリフ(「話者名: セリフ」を1行ずつ。自動保存)</label>
+  <textarea id="text" spellcheck="false" placeholder="Fola: &lt;gasp&gt; いい考えだね！ &lt;laugh&gt;&#10;Rami: でしょ？"></textarea>
+  <div class="info" id="info"></div>
+</section>
+
+<section>
+  <div class="grid2">
+    <div>
+      <label for="chunk" style="margin-top:0">1回で生成する行数(0=全部)</label>
+      <input type="number" id="chunk" min="0" step="1" inputmode="numeric">
+    </div>
+    <div>
+      <label for="gap" style="margin-top:0">結合時の無音(秒)</label>
+      <input type="number" id="gap" min="0" step="0.1" inputmode="decimal">
+    </div>
+  </div>
+  <div class="row">
+    <button id="btnGen" class="primary">音声を生成</button>
+    <button id="btnStop" disabled>停止</button>
+  </div>
+  <div class="info" id="status"></div>
+  <div id="results"></div>
+</section>
+
+<details id="dVoice">
+  <summary>声の設定(Fola / Rami)</summary>
+  <div class="grid2">
+    <div><label>話者1 台本上の名前</label><input type="text" id="a0"></div>
+    <div><label>話者1 voiceName</label><input type="text" id="v0"></div>
+    <div><label>話者2 台本上の名前</label><input type="text" id="a1"></div>
+    <div><label>話者2 voiceName</label><input type="text" id="v1"></div>
+  </div>
+  <label>モデル</label><input type="text" id="model">
+  <div class="grid2">
+    <div><label>mode</label><input type="text" id="mode"></div>
+    <div><label>temperature</label><input type="number" id="temp" step="0.1" min="0" max="2" inputmode="decimal"></div>
+  </div>
+  <div class="hint">Playgroundの「Get code」と同じ値が初期設定です。</div>
+</details>
+
+<details id="dApi">
+  <summary>APIキーとバックアップ</summary>
+  <label>Gemini APIキー(この端末のブラウザ内にのみ保存)</label>
+  <input type="password" id="apiKey" autocomplete="off">
+  <div class="row">
+    <button id="btnBackup">全台本をバックアップ(.json)</button>
+  </div>
+  <div class="hint">バックアップ(.json)は「ファイルから読み込み」で戻せます。APIキーはバックアップに含まれません。</div>
+</details>
+
+<script>
+"use strict";
+const LS = "tts-tool-v1";
+const $ = (id) => document.getElementById(id);
+const uid = () => Math.random().toString(36).slice(2, 10);
+
+const DEFAULTS = {
+  apiKey: "",
+  model: "gemini-3.8-flash-tts",
+  mode: "VERBATIM",
+  temperature: 1,
+  chunk: 0,
+  gap: 0.3,
+  speakers: [
+    { alias: "Fola", voice: "Fola" },
+    { alias: "Rami", voice: "Rami" },
+  ],
+};
+
+function loadState() {
+  try {
+    const s = JSON.parse(localStorage.getItem(LS));
+    if (s && Array.isArray(s.scripts) && s.scripts.length) {
+      s.settings = Object.assign({}, DEFAULTS, s.settings || {});
+      if (!s.scripts.find((x) => x.id === s.current)) s.current = s.scripts[0].id;
+      return s;
+    }
+  } catch (e) {}
+  const id = uid();
+  return {
+    scripts: [{ id, name: "サンプル", text: "Fola: <gasp> それはいい考えだね！ <laugh>\nRami: でしょ？ さっそくやってみようよ。" }],
+    current: id,
+    settings: Object.assign({}, DEFAULTS),
+  };
+}
+let state = loadState();
+function save() {
+  try { localStorage.setItem(LS, JSON.stringify(state)); } catch (e) { setStatus("保存に失敗しました(ブラウザの保存領域)。", true); }
+}
+const cur = () => state.scripts.find((x) => x.id === state.current);
+const S = () => state.settings;
+
+/* ---------- 台本UI ---------- */
+function renderSelect() {
+  const sel = $("scriptSel");
+  sel.innerHTML = "";
+  for (const sc of state.scripts) {
+    const o = document.createElement("option");
+    o.value = sc.id; o.textContent = sc.name;
+    if (sc.id === state.current) o.selected = true;
+    sel.appendChild(o);
+  }
+  $("text").value = cur().text;
+  updateInfo();
+}
+function updateInfo() {
+  const { entries, unknown } = parseScript(cur().text);
+  const counts = S().speakers.map((sp, i) => `${sp.alias || "話者" + (i + 1)} ${entries.filter((e) => e.spk === i).length}行`);
+  let t = `${entries.length}行 / ${cur().text.length}文字 (${counts.join(" , ")})`;
+  const el = $("info");
+  el.textContent = t;
+  el.className = "info";
+  if (unknown.length) {
+    el.textContent += `\n未登録の話者名: ${unknown.join(", ")} → 直前のセリフの続きとして扱います`;
+    el.classList.add("warn");
+  }
+}
+$("text").addEventListener("input", () => { cur().text = $("text").value; save(); updateInfo(); });
+$("scriptSel").addEventListener("change", (e) => { state.current = e.target.value; save(); renderSelect(); });
+$("btnNew").onclick = () => {
+  const name = prompt("台本の名前", "新しい台本"); if (!name) return;
+  const sc = { id: uid(), name, text: "" };
+  state.scripts.push(sc); state.current = sc.id; save(); renderSelect();
+};
+$("btnRename").onclick = () => {
+  const name = prompt("新しい名前", cur().name); if (!name) return;
+  cur().name = name; save(); renderSelect();
+};
+$("btnDup").onclick = () => {
+  const sc = { id: uid(), name: cur().name + " (コピー)", text: cur().text };
+  state.scripts.push(sc); state.current = sc.id; save(); renderSelect();
+};
+$("btnDel").onclick = () => {
+  if (!confirm(`「${cur().name}」を削除しますか?`)) return;
+  state.scripts = state.scripts.filter((x) => x.id !== state.current);
+  if (!state.scripts.length) state.scripts.push({ id: uid(), name: "新しい台本", text: "" });
+  state.current = state.scripts[0].id; save(); renderSelect();
+};
+
+/* ---------- 読み込み/書き出し ---------- */
+$("btnImport").onclick = () => $("fileIn").click();
+$("fileIn").addEventListener("change", async (e) => {
+  const files = Array.from(e.target.files || []);
+  let added = 0;
+  for (const f of files) {
+    const text = await f.text();
+    const base = f.name.replace(/\.[^.]+$/, "");
+    let handled = false;
+    if (/\.json$/i.test(f.name)) {
+      try {
+        const j = JSON.parse(text);
+        if (j && Array.isArray(j.scripts)) {
+          for (const s of j.scripts) {
+            if (s && typeof s.text === "string") { state.scripts.push({ id: uid(), name: String(s.name || base), text: s.text }); added++; }
+          }
+          handled = true;
+        }
+      } catch (err) {}
+    }
+    if (!handled) { state.scripts.push({ id: uid(), name: base, text }); added++; }
+  }
+  if (added) { state.current = state.scripts[state.scripts.length - 1].id; save(); renderSelect(); setStatus(`${added}件の台本を読み込みました。`); }
+  e.target.value = "";
+});
+function download(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+}
+const safeName = (s) => s.replace(/[\\/:*?"<>|]/g, "_");
+$("btnExport").onclick = () => download(new Blob([cur().text], { type: "text/plain;charset=utf-8" }), safeName(cur().name) + ".txt");
+$("btnBackup").onclick = () => {
+  const data = { scripts: state.scripts.map(({ name, text }) => ({ name, text })) };
+  download(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), "tts-scripts-backup.json");
+};
+
+/* ---------- 設定UI ---------- */
+function renderSettings() {
+  const s = S();
+  $("a0").value = s.speakers[0].alias; $("v0").value = s.speakers[0].voice;
+  $("a1").value = s.speakers[1].alias; $("v1").value = s.speakers[1].voice;
+  $("model").value = s.model; $("mode").value = s.mode; $("temp").value = s.temperature;
+  $("apiKey").value = s.apiKey; $("chunk").value = s.chunk; $("gap").value = s.gap;
+}
+function bind(id, fn) { $(id).addEventListener("input", () => { fn($(id).value); save(); updateInfo(); }); }
+bind("a0", (v) => (S().speakers[0].alias = v.trim()));
+bind("v0", (v) => (S().speakers[0].voice = v.trim()));
+bind("a1", (v) => (S().speakers[1].alias = v.trim()));
+bind("v1", (v) => (S().speakers[1].voice = v.trim()));
+bind("model", (v) => (S().model = v.trim()));
+bind("mode", (v) => (S().mode = v.trim()));
+bind("temp", (v) => (S().temperature = v === "" ? 1 : Number(v)));
+bind("apiKey", (v) => (S().apiKey = v.trim()));
+bind("chunk", (v) => (S().chunk = Math.max(0, parseInt(v || "0", 10) || 0)));
+bind("gap", (v) => (S().gap = Math.max(0, Number(v) || 0)));
+
+/* ---------- 台本パース ---------- */
+function parseScript(text) {
+  const names = S().speakers.map((s) => (s.alias || "").toLowerCase());
+  const entries = [];
+  const unknown = new Set();
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#") || line.startsWith("//")) continue;
+    const m = line.match(/^([^:：\s][^:：]{0,24}?)\s*[:：]\s*(.*)$/);
+    if (m) {
+      const idx = names.indexOf(m[1].trim().toLowerCase());
+      if (idx >= 0) { entries.push({ spk: idx, text: m[2] }); continue; }
+      if (!/^<|^\(/.test(m[1]) && m[1].length <= 12 && !/[。、！？!?.,]/.test(m[1])) unknown.add(m[1].trim());
+    }
+    if (entries.length) entries[entries.length - 1].text += "\n" + line;
+  }
+  return { entries, unknown: Array.from(unknown) };
+}
+
+/* ---------- 音声処理 ---------- */
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+function concatBytes(arrs) {
+  const total = arrs.reduce((n, a) => n + a.length, 0);
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const a of arrs) { out.set(a, o); o += a.length; }
+  return out;
+}
+function makeWav(pcm, rate, bits) {
+  const ch = 1, byteRate = (rate * ch * bits) / 8, block = (ch * bits) / 8;
+  const buf = new ArrayBuffer(44 + pcm.length);
+  const v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, "RIFF"); v.setUint32(4, 36 + pcm.length, true); w(8, "WAVE"); w(12, "fmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, ch, true);
+  v.setUint32(24, rate, true); v.setUint32(28, byteRate, true); v.setUint16(32, block, true);
+  v.setUint16(34, bits, true); w(36, "data"); v.setUint32(40, pcm.length, true);
+  new Uint8Array(buf, 44).set(pcm);
+  return new Blob([buf], { type: "audio/wav" });
+}
+function parseMime(mime) {
+  const rate = (mime.match(/rate=(\d+)/) || [])[1];
+  const bits = (mime.match(/audio\/L(\d+)/i) || [])[1];
+  return { rate: rate ? parseInt(rate, 10) : 24000, bits: bits ? parseInt(bits, 10) : 16, isPcm: !!bits || /pcm/i.test(mime) };
+}
+
+/* ---------- 生成 ---------- */
+let abortCtl = null;
+function setStatus(msg, isErr) {
+  const el = $("status"); el.textContent = msg; el.className = "info" + (isErr ? " warn" : "");
+}
+function buildBody(chunkEntries) {
+  const s = S();
+  const used = new Set(chunkEntries.map((e) => e.spk));
+  const generationConfig = { temperature: s.temperature, responseModalities: ["AUDIO"] };
+  let text;
+  if (used.size >= 2) {
+    text = chunkEntries.map((e) => `Speaker ${e.spk + 1}: ${e.text}`).join("\n");
+    const mv = {
+      speakerVoiceConfigs: s.speakers.map((sp, i) => ({
+        speaker: `Speaker ${i + 1}`,
+        voiceConfig: { prebuiltVoiceConfig: { voiceName: sp.voice } },
+      })),
+    };
+    if (s.mode) mv.mode = s.mode;
+    generationConfig.speechConfig = { multiSpeakerVoiceConfig: mv };
+  } else {
+    const spk = chunkEntries[0].spk;
+    text = chunkEntries.map((e) => e.text).join("\n");
+    generationConfig.speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName: s.speakers[spk].voice } } };
+  }
+  return { contents: [{ role: "user", parts: [{ text }] }], generationConfig };
+}
+async function callApi(body, signal) {
+  const s = S();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model)}:generateContent`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch(url, {
+      method: "POST", signal,
+      headers: { "Content-Type": "application/json", "x-goog-api-key": s.apiKey },
+      body: JSON.stringify(body),
+    });
+    if ((res.status === 429 || res.status >= 500) && attempt === 0) {
+      await new Promise((r) => setTimeout(r, 3000)); continue;
+    }
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((j.error && j.error.message) || `HTTP ${res.status}`);
+    const parts = (((j.candidates || [])[0] || {}).content || {}).parts || [];
+    const audio = parts.filter((p) => p.inlineData && p.inlineData.data);
+    if (!audio.length) throw new Error("音声が返ってきませんでした: " + JSON.stringify(j).slice(0, 300));
+    return audio.map((p) => p.inlineData);
+  }
+}
+function addResult(title, preview, blob, fname) {
+  const d = document.createElement("div"); d.className = "res";
+  const h = document.createElement("div"); h.textContent = title; h.style.fontWeight = "600";
+  const t = document.createElement("div"); t.className = "t"; t.textContent = preview;
+  const a = document.createElement("audio"); a.controls = true; a.src = URL.createObjectURL(blob);
+  const b = document.createElement("button"); b.textContent = "保存 (" + fname + ")"; b.onclick = () => download(blob, fname);
+  d.append(h, t, a, b);
+  $("results").appendChild(d);
+}
+$("btnGen").onclick = async () => {
+  const s = S();
+  if (!s.apiKey) { $("dApi").open = true; setStatus("APIキーを入力してください。", true); return; }
+  if (!s.speakers[0].voice || !s.speakers[1].voice) { $("dVoice").open = true; setStatus("voiceNameを入力してください。", true); return; }
+  const { entries } = parseScript(cur().text);
+  if (!entries.length) { setStatus("セリフがありません。「話者名: セリフ」の形式で書いてください。", true); return; }
+  const size = s.chunk > 0 ? s.chunk : entries.length;
+  const chunks = [];
+  for (let i = 0; i < entries.length; i += size) chunks.push(entries.slice(i, i + size));
+
+  $("results").innerHTML = "";
+  $("btnGen").disabled = true; $("btnStop").disabled = false;
+  abortCtl = new AbortController();
+  const base = safeName(cur().name);
+  const pcms = []; let rate = 24000, bits = 16, canJoin = true;
+  try {
+    for (let i = 0; i < chunks.length; i++) {
+      setStatus(`生成中 ${i + 1} / ${chunks.length}`);
+      const parts = await callApi(buildBody(chunks[i]), abortCtl.signal);
+      const mimes = parts.map((p) => parseMime(p.mimeType || ""));
+      const preview = chunks[i].map((e) => `${s.speakers[e.spk].alias}: ${e.text}`).join("\n");
+      const no = String(i + 1).padStart(2, "0");
+      if (mimes.every((m) => m.isPcm)) {
+        rate = mimes[0].rate; bits = mimes[0].bits;
+        const pcm = concatBytes(parts.map((p) => b64ToBytes(p.data)));
+        pcms.push(pcm);
+        addResult(`パート ${i + 1}`, preview, makeWav(pcm, rate, bits), `${base}_${no}.wav`);
+      } else {
+        canJoin = false;
+        const p = parts[0], ext = (p.mimeType || "audio/wav").split("/")[1].split(";")[0] || "wav";
+        addResult(`パート ${i + 1}`, preview, new Blob([b64ToBytes(p.data)], { type: p.mimeType }), `${base}_${no}.${ext}`);
+      }
+    }
+    if (pcms.length > 1 && canJoin) {
+      const gapBytes = new Uint8Array(Math.round(s.gap * rate) * (bits / 8));
+      const all = [];
+      pcms.forEach((p, i) => { if (i) all.push(gapBytes); all.push(p); });
+      addResult("全パート結合", "", makeWav(concatBytes(all), rate, bits), `${base}_all.wav`);
+    }
+    setStatus("完了しました。", false); $("status").classList.add("ok");
+  } catch (err) {
+    if (err.name === "AbortError") setStatus("停止しました。");
+    else setStatus("エラー: " + err.message, true);
+  } finally {
+    $("btnGen").disabled = false; $("btnStop").disabled = true; abortCtl = null;
+  }
+};
+$("btnStop").onclick = () => { if (abortCtl) abortCtl.abort(); };
+
+renderSettings();
+renderSelect();
+</script>
+</body>
+</html>
