@@ -71,6 +71,12 @@ details.parts{margin-top:8px}
 .volrow input[type=range]{flex:1 1 auto;min-width:0;height:32px}
 .volrow .vl{flex:0 0 auto;font-size:13px;color:var(--sub);min-width:5.5em;font-variant-numeric:tabular-nums}
 .volrow button{flex:0 0 auto}
+.livebar{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:30;display:flex;align-items:center;gap:10px;padding:8px 10px 8px 14px;border-radius:14px;background:var(--card);border:1px solid var(--line);box-shadow:0 6px 20px rgba(0,0,0,.18)}
+.livebar[hidden]{display:none}
+.livebar .lt{flex:1 1 auto;min-width:0;text-align:left;border:0;background:none;padding:4px 0;min-height:36px;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.livebar.wait .eq i,.livebar.done .eq i{animation-play-state:paused;opacity:.45}
+body.has-live{padding-bottom:calc(96px + env(safe-area-inset-bottom))}
+.res.playing{background:color-mix(in srgb,var(--acc) 10%,transparent);box-shadow:inset 3px 0 0 var(--acc);padding-left:8px;border-radius:6px}
 .tagrow{display:flex;gap:6px;align-items:center;margin-top:6px}
 .tagrow input{flex:1 1 auto;min-width:0}
 .tagrow button{flex:0 0 auto;min-width:44px;padding:4px 8px}
@@ -110,6 +116,7 @@ details.parts{margin-top:8px}
 <section>
   <label for="gap" style="margin-top:0">結合時の無音(秒)</label>
   <input type="number" id="gap" min="0" step="0.1" inputmode="decimal" style="max-width:10em">
+  <label style="display:flex;align-items:center;gap:8px;color:var(--fg);font-size:15px;min-height:36px"><input type="checkbox" id="livePlay" style="width:20px;height:20px;margin:0">生成しながら、できた順に再生する</label>
   <div class="row">
     <button id="btnGen" class="primary">全体を生成</button>
     <button id="btnGenLine">カーソル行だけ生成</button>
@@ -180,6 +187,11 @@ details.parts{margin-top:8px}
   <div class="hint">バックアップ(.json)には台本・話者設定・表現タグが入り、「ファイルから読み込み」で戻せます。APIキーは含まれません。</div>
 </details>
 
+<div class="livebar" id="liveBar" hidden>
+  <span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+  <button type="button" class="lt" id="liveText">再生準備中…</button>
+  <button type="button" class="small" id="liveStopBtn">■ 停止</button>
+</div>
 <script>
 "use strict";
 const LS = "tts-tool-v1";
@@ -199,6 +211,7 @@ const DEFAULTS = {
   voiceCache: [],
   showPresets: false,
   tags: null,
+  livePlay: true,
   drive: { folder: "", key: "", auto: true, pending: false },
 };
 const DEFAULT_TAGS = ["<laugh>", "<chuckle>", "<giggle>", "<gasp>", "<sigh>", "<breath>", "<short pause>", "<long pause>", "<whispers>", "<cry>", "<sob>", "<cough>", "<yawn>", "<phew>", "<tsk>", "<shout>", "<scream>"];
@@ -1343,6 +1356,7 @@ $("btnGen").onclick = async () => {
   const partBox = document.createElement("div"); det.appendChild(partBox);
   if (entries.length) $("results").appendChild(det);
   run = { base: safeName(cur().name), clips: [], top, partBox, sum };
+  liveStart(run); // ボタン操作の直後に音声出力を準備(スマホの自動再生制限対策)
 
   setBusy(true);
   abortCtl = new AbortController();
@@ -1352,7 +1366,7 @@ $("btnGen").onclick = async () => {
   try {
     let k = 0;
     for (const e of entries) {
-      if (e.se != null) { const c = { se: e }; run.clips.push(c); partBox.appendChild(renderSeClip(c)); continue; }
+      if (e.se != null) { const c = { se: e }; run.clips.push(c); partBox.appendChild(renderSeClip(c)); livePump(); continue; }
       k++;
       const who = S().speakers[e.spk].alias;
       ld.set(speech.length > 1 ? `生成中 ${k} / ${speech.length}(${who})` : `生成中(${who})`, speech.length > 1 ? (k - 0.5) / speech.length : null);
@@ -1360,20 +1374,121 @@ $("btnGen").onclick = async () => {
       const clip = Object.assign({ entry: e, no: k, fname: `${run.base}_${String(k).padStart(2, "0")}.${r.ext}` }, r);
       run.clips.push(clip);
       partBox.appendChild(renderPart(clip));
+      livePump();
       sum.textContent = `個別音声・音量(${k}件)`;
     }
+    liveDone();
     ld.set("結合中…", 1);
     await updateCombined();
     setStatus("完了しました。");
     $("status").classList.add("ok");
   } catch (err) {
-    if (err.name === "AbortError") setStatus("停止しました。");
-    else setStatus("エラー: " + err.message, true);
+    if (err.name === "AbortError") { setStatus("停止しました。"); liveStop(); }
+    else { setStatus("エラー: " + err.message, true); liveDone(); }
   } finally {
     ld.stop(); setBusy(false); abortCtl = null;
     if (run) run.clips.forEach((c) => c.ui && !c.se && renderPart(c));
   }
 };
+
+/* ---------- 生成しながら順に再生 ---------- */
+const live = { ctx: null, on: false, nodes: [], idx: 0, lastEnd: null, sched: [], timer: null, genDone: false, run: null, busy: false, cur: null };
+function liveStart(runObj) {
+  liveStop();
+  if (!S().livePlay) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+  try { if (!live.ctx) live.ctx = new AC(); live.ctx.resume(); } catch (e) { return; }
+  Object.assign(live, { on: true, nodes: [], idx: 0, lastEnd: null, sched: [], genDone: false, run: runObj, busy: false, cur: null });
+  $("liveBar").hidden = false; $("liveBar").className = "livebar wait"; $("liveText").textContent = "最初のセリフを生成中…";
+  document.body.classList.add("has-live");
+  live.timer = setInterval(liveTick, 200);
+}
+function liveStop() {
+  for (const n of live.nodes) { try { n.stop(); } catch (e) {} }
+  live.nodes = []; live.on = false;
+  clearInterval(live.timer); live.timer = null;
+  if (live.cur && live.cur.ui) live.cur.ui.classList.remove("playing");
+  live.cur = null;
+  $("liveBar").hidden = true; document.body.classList.remove("has-live");
+}
+function liveDone() { live.genDone = true; livePump(); }
+async function livePump() {
+  if (!live.on || live.busy) return;
+  live.busy = true;
+  try {
+    const clips = live.run.clips;
+    while (live.on && live.idx < clips.length) {
+      const c = clips[live.idx];
+      const ctx = live.ctx;
+      let buf, gain;
+      if (c.se) {
+        const item = findSe(c.se.se);
+        if (!item) { live.idx++; continue; }
+        const data = await seSamples(item, 24000);
+        buf = ctx.createBuffer(1, data.length, 24000); buf.copyToChannel(data, 0);
+        gain = item.vol * (c.se.vol != null ? c.se.vol : 1);
+      } else {
+        if (!c.pcm) { live.idx++; continue; }
+        const n = c.pcm.length >> 1;
+        const dv = new DataView(c.pcm.buffer, c.pcm.byteOffset, n * 2);
+        const f = new Float32Array(n);
+        for (let i = 0; i < n; i++) f[i] = dv.getInt16(i * 2, true) / 32768;
+        buf = ctx.createBuffer(1, n, c.fmt.rate); buf.copyToChannel(f, 0);
+        const sp = S().speakers[c.entry.spk];
+        gain = (sp && sp.vol != null ? sp.vol : 1) * (c.entry.vol != null ? c.entry.vol : 1);
+      }
+      if (!live.on) break;
+      const now = ctx.currentTime, gap = S().gap;
+      const overlay = !!(c.se && c.se.offset != null);
+      let start;
+      // 設定どおりの間隔。生成が間に合っていなければ、できた時点ですぐ鳴らす
+      if (overlay) start = Math.max(now + 0.05, (live.lastEnd != null ? live.lastEnd : now) + c.se.offset);
+      else start = live.lastEnd == null ? now + 0.15 : Math.max(live.lastEnd + gap, now + 0.05);
+      const src = ctx.createBufferSource(); src.buffer = buf;
+      const g = ctx.createGain(); g.gain.value = gain;
+      src.connect(g); g.connect(ctx.destination);
+      src.start(start);
+      live.nodes.push(src);
+      live.sched.push({ clip: c, start, end: start + buf.duration });
+      if (!overlay) live.lastEnd = start + buf.duration;
+      live.idx++;
+    }
+  } catch (e) {
+    // 再生できなくても生成は続ける
+  } finally { live.busy = false; }
+  if (live.on && live.idx < live.run.clips.length) livePump();
+}
+function liveTick() {
+  if (!live.on) return;
+  const t = live.ctx.currentTime;
+  const playing = live.sched.filter((s) => t >= s.start && t < s.end);
+  const sp = playing.find((s) => !s.clip.se) || playing[0];
+  const c = sp ? sp.clip : null;
+  if (live.cur !== c) {
+    if (live.cur && live.cur.ui) live.cur.ui.classList.remove("playing");
+    live.cur = c;
+  }
+  if (c && c.ui) c.ui.classList.add("playing");
+  const bar = $("liveBar"), tx = $("liveText");
+  const maxEnd = live.sched.reduce((m, s) => Math.max(m, s.end), 0);
+  if (c) {
+    bar.className = "livebar";
+    tx.textContent = c.se ? `🔊 ${c.se.line + 1}行目 [${c.se.se}]` : `▶ ${c.entry.line + 1}行目 ${S().speakers[c.entry.spk].alias}: ${c.entry.text}`;
+  } else if (!live.genDone || live.idx < live.run.clips.length) {
+    bar.className = "livebar wait";
+    tx.textContent = live.sched.length ? "次のセリフを生成中…" : "最初のセリフを生成中…";
+  } else if (t >= maxEnd) {
+    bar.className = "livebar done"; tx.textContent = "再生が終わりました";
+    clearInterval(live.timer); live.timer = null;
+    setTimeout(() => { if (live.on && !live.timer) liveStop(); }, 2500);
+  }
+}
+$("liveStopBtn").onclick = liveStop;
+$("liveText").onclick = () => { if (live.cur && live.cur.ui) live.cur.ui.scrollIntoView({ behavior: "smooth", block: "center" }); };
+$("livePlay").checked = S().livePlay !== false;
+$("livePlay").addEventListener("change", (e) => { S().livePlay = e.target.checked; save(); if (!e.target.checked) liveStop(); });
 
 /* ---------- カーソル行だけ生成 ---------- */
 function entryAtCursor() {
