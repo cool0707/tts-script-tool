@@ -51,6 +51,26 @@ details.parts{margin-top:8px}
 .mini-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
 #miniBody audio{width:100%;height:40px;margin-top:4px}
 #miniBody .row{margin-top:4px}
+.loader-wrap{margin-top:8px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);position:relative;overflow:hidden}
+.loader-wrap::before{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 20%,rgba(26,115,232,.10) 50%,transparent 80%);background-size:250% 100%;animation:shimmer 1.8s linear infinite;pointer-events:none}
+.loader{display:flex;align-items:center;gap:12px;position:relative}
+.eq{display:flex;align-items:center;gap:3px;height:24px;flex:0 0 auto}
+.eq i{display:block;width:4px;height:24px;border-radius:2px;background:var(--acc);transform:scaleY(.3);animation:eq 1.1s ease-in-out infinite}
+.eq i:nth-child(2){animation-delay:-.9s}.eq i:nth-child(3){animation-delay:-.6s}.eq i:nth-child(4){animation-delay:-.3s}.eq i:nth-child(5){animation-delay:-.75s}
+.loader .lt{flex:1 1 auto;font-size:14px;min-width:0}
+.loader .el{flex:0 0 auto;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
+.pbar{height:4px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:8px;position:relative}
+.pbar i{position:absolute;top:0;left:0;height:100%;width:35%;border-radius:2px;background:var(--acc);animation:indet 1.4s ease-in-out infinite}
+.pbar.det i{animation:none;transition:width .5s ease}
+.loader-wrap .note{position:relative;margin-top:4px}
+@keyframes eq{0%,100%{transform:scaleY(.25)}50%{transform:scaleY(1)}}
+@keyframes indet{0%{left:-35%}100%{left:100%}}
+@keyframes shimmer{0%{background-position:150% 0}100%{background-position:-100% 0}}
+@media (prefers-reduced-motion:reduce){.eq i,.pbar i,.loader-wrap::before{animation-duration:3s}}
+.volrow{display:flex;align-items:center;gap:8px;margin-top:6px}
+.volrow input[type=range]{flex:1 1 auto;min-width:0;height:32px}
+.volrow .vl{flex:0 0 auto;font-size:13px;color:var(--sub);min-width:5.5em;font-variant-numeric:tabular-nums}
+.volrow button{flex:0 0 auto}
 .tagrow{display:flex;gap:6px;align-items:center;margin-top:6px}
 .tagrow input{flex:1 1 auto;min-width:0}
 .tagrow button{flex:0 0 auto;min-width:44px;padding:4px 8px}
@@ -73,7 +93,7 @@ details.parts{margin-top:8px}
     <button id="btnExport">この台本を書き出し(.txt)</button>
   </div>
   <input type="file" id="fileIn" multiple accept=".txt,.md,.json,text/plain,application/json">
-  <label for="text">セリフ(「話者名: セリフ」を1行ずつ。自動保存)</label>
+  <label for="text">セリフ(1行=1音声。話者名を省いた行は直前の話者。行末に {80%} で音量指定。自動保存)</label>
   <div class="ins">
     <div class="chips" id="spkChips"></div>
     <div class="chips" id="tagChips"></div>
@@ -134,7 +154,7 @@ details.parts{margin-top:8px}
 
 <details class="box" id="dSe">
   <summary>効果音</summary>
-  <div class="hint">台本に1行で <b>[名前]</b> と書くと、その位置に効果音を挟みます。<b>[名前:0.1]</b> のように秒数を付けると、直前の音声の終わりから0.1秒後に鳴らし、次のセリフに重ねます(待たずに次へ進みます)。マイナス値(例 [名前:-0.5])なら直前のセリフの終わりに重なります。</div>
+  <div class="hint">台本に1行で <b>[名前]</b> と書くと、その位置に効果音を挟みます。<b>[名前:0.1]</b> のように秒数を付けると、直前の音声の終わりから0.1秒後に鳴らし、次のセリフに重ねます(待たずに次へ進みます)。マイナス値(例 [名前:-0.5])なら直前のセリフの終わりに重なります。<b>[名前 50%]</b> や <b>[名前:0.1 50%]</b> でその箇所だけ音量を変えられます(下の音量設定に掛け合わせ)。</div>
   <label>Google Drive の効果音フォルダ(URL)</label>
   <input type="text" id="driveFolder" placeholder="https://drive.google.com/drive/folders/…" autocapitalize="off" autocomplete="off" spellcheck="false">
   <label>Drive用 APIキー(空欄なら Gemini のキーを使用)</label>
@@ -319,7 +339,7 @@ $("seIn").addEventListener("change", async (ev) => {
 // 名前を変えたら台本の [旧名] / [旧名:秒] も置換
 function renameSeInScripts(oldName, newName) {
   const esc = oldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = () => new RegExp(`^([ \\t]*)\\[${esc}([:：][^\\]]*)?\\]`, "gim");
+  const re = () => new RegExp(`^([ \\t]*)\\[${esc}((?:\\s*[:：]|\\s+\\d)[^\\]]*)?\\]`, "gim");
   let n = 0;
   for (const sc of state.scripts) {
     sc.text = sc.text.replace(re(), (m, a, b) => { n++; return `${a}[${newName}${b || ""}]`; });
@@ -540,16 +560,17 @@ $("btnTagReset").onclick = () => {
 };
 
 function updateInfo() {
-  const { entries, unknown } = parseScript(cur().text);
+  const { entries, unknown, orphan } = parseScript(cur().text);
   const counts = S().speakers.map((sp, i) => `${sp.alias || "話者" + (i + 1)} ${entries.filter((e) => e.spk === i).length}行`);
   const ses = entries.filter((e) => e.se != null);
   const el = $("info");
   el.textContent = `${entries.length - ses.length}セリフ / ${cur().text.length}文字 (${counts.join(" , ")})` + (ses.length ? ` / 効果音 ${ses.length}` : "");
   el.className = "info";
   if (unknown.length) {
-    el.textContent += `\n未登録の話者名: ${unknown.join(", ")} → 直前のセリフの続きとして扱います`;
+    el.textContent += `\n未登録の話者名: ${unknown.join(", ")} → 直前の話者のセリフとして読みます`;
     el.classList.add("warn");
   }
+  if (orphan) { el.textContent += `\n話者が決まる前の行 ${orphan}行は無視します`; el.classList.add("warn"); }
   const missSe = [...new Set(ses.filter((e) => !findSe(e.se)).map((e) => e.se))];
   if (missSe.length) {
     el.textContent += `\n未登録の効果音: ${missSe.join(", ")}`;
@@ -731,6 +752,15 @@ function renderSpeakers() {
     d.appendChild(desc);
     mk("声ID(直接入力)", manual);
     mk("話し方(style・任意)", style);
+    const svw = document.createElement("div"); svw.className = "volrow";
+    const svl = document.createElement("span"); svl.className = "vl";
+    const sv = document.createElement("input"); sv.type = "range"; sv.min = "0"; sv.max = "200"; sv.step = "5";
+    const spct = () => Math.round((sp.vol != null ? sp.vol : 1) * 100);
+    sv.value = spct(); svl.textContent = `${spct()}%`;
+    sv.oninput = () => { svl.textContent = `${sv.value}%`; };
+    sv.onchange = () => { sp.vol = Number(sv.value) / 100; save(); scheduleRemix(); };
+    svw.append(svl, sv);
+    mk("この話者の音量(結合時)", svw);
     box.appendChild(d);
     showDesc();
   });
@@ -782,49 +812,53 @@ bind("apiKey", (v) => (S().apiKey = v.trim()));
 bind("gap", (v) => (S().gap = Math.max(0, Number(v) || 0)));
 
 /* ---------- 台本パース ---------- */
+// 効果音行: [名前] [名前:0.1] [名前 80%] [名前:0.1 80%]
+const SE_RE = /^\[([^\]:：]+?)\s*(?:[:：]\s*([-+]?\d*\.?\d+))?\s*(?:(\d+(?:\.\d+)?)\s*[%％])?\s*\]$/;
+// セリフ中の音量指定 {80%} を取り出して本文から除く
+const VOL_RE = /\s*[{｛]\s*(\d+(?:\.\d+)?)\s*[%％]\s*[}｝]/g;
+function takeVol(t) {
+  let vol = 1;
+  const text = t.replace(VOL_RE, (m, v) => { vol = parseFloat(v) / 100; return ""; }).trim();
+  return { text, vol };
+}
 function parseScript(text) {
   const names = S().speakers.map((s) => (s.alias || "").toLowerCase());
   const entries = [];
   const unknown = new Set();
+  let curSpk = null, orphan = 0;
   const lines = text.split(/\r?\n/);
   for (let ln = 0; ln < lines.length; ln++) {
     const line = lines[ln].trim();
     if (!line || line.startsWith("#") || line.startsWith("//")) continue;
-    const se = line.match(/^\[([^\]:：]+?)\s*(?:[:：]\s*([-+]?\d*\.?\d+)\s*)?\]$/);
-    if (se) { entries.push({ se: se[1].trim(), offset: se[2] != null ? parseFloat(se[2]) : null, line: ln, endLine: ln }); continue; }
+    const se = line.match(SE_RE);
+    if (se) {
+      const name = se[1].trim();
+      entries.push({ se: name, offset: se[2] != null ? parseFloat(se[2]) : null, offsetStr: se[2] || null, vol: se[3] != null ? parseFloat(se[3]) / 100 : 1, text: "[" + name, line: ln, endLine: ln });
+      continue;
+    }
     const m = line.match(/^([^:：\s][^:：]{0,24}?)\s*[:：]\s*(.*)$/);
     if (m) {
       const idx = names.indexOf(m[1].trim().toLowerCase());
-      if (idx >= 0 && names[idx]) { entries.push({ spk: idx, text: m[2], line: ln, endLine: ln }); continue; }
+      if (idx >= 0 && names[idx]) {
+        curSpk = idx;
+        const tv = takeVol(m[2]);
+        if (tv.text) entries.push({ spk: idx, text: tv.text, vol: tv.vol, line: ln, endLine: ln }); // 「話者:」だけの行は話者の切り替えのみ
+        continue;
+      }
       if (!/^<|^\(/.test(m[1]) && m[1].length <= 12 && !/[。、！？!?.,]/.test(m[1])) unknown.add(m[1].trim());
     }
-    const last = entries[entries.length - 1];
-    if (last && last.se == null) { last.text += "\n" + line; last.endLine = ln; }
+    // 話者名のない行 = 直前の話者の別セリフ(1行=1音声)
+    if (curSpk == null) { orphan++; continue; }
+    const tv = takeVol(line);
+    if (tv.text) entries.push({ spk: curSpk, text: tv.text, vol: tv.vol, line: ln, endLine: ln });
   }
-  return { entries, unknown: Array.from(unknown) };
+  return { entries, unknown: Array.from(unknown), orphan };
 }
 
 /* ---------- 生成単位への分割 ---------- */
-// カスタム声: 同じ話者の連続行を1リクエスト(単独話者)
-// プリセット声: 最大2話者までまとめて1リクエスト(複数話者)
+// 1行(セリフ)= 1リクエスト = 1音声
 function segmentEntries(entries) {
-  const s = S();
-  const size = Infinity;
-  const segs = [];
-  let c = null;
-  for (const e of entries) {
-    if (e.se != null) { c = { se: e }; segs.push(c); continue; }
-    const custom = isCustom(s.speakers[e.spk].voice);
-    if (custom) {
-      if (c && !c.se && c.custom && c.spks[0] === e.spk && c.entries.length < size) c.entries.push(e);
-      else { c = { custom: true, spks: [e.spk], entries: [e] }; segs.push(c); }
-    } else {
-      if (c && !c.se && !c.custom && c.entries.length < size && (c.spks.includes(e.spk) || c.spks.length < 2)) {
-        c.entries.push(e); if (!c.spks.includes(e.spk)) c.spks.push(e.spk);
-      } else { c = { custom: false, spks: [e.spk], entries: [e] }; segs.push(c); }
-    }
-  }
-  return segs;
+  return entries.map((e) => (e.se != null ? { se: e } : { custom: isCustom(S().speakers[e.spk].voice), spks: [e.spk], entries: [e] }));
 }
 function voiceConfigFor(id) {
   return isCustom(id) ? { voice: id } : { prebuiltVoiceConfig: { voiceName: id } };
@@ -930,7 +964,8 @@ async function callApi(body, signal) {
       body: JSON.stringify(body),
     });
     if ((res.status === 429 || res.status >= 500) && attempt < waits.length) {
-      setStatus($("status").textContent.split("\n")[0] + `\n混雑のため ${waits[attempt] / 1000}秒待って再試行します…`);
+      const nm = `混雑のため ${waits[attempt] / 1000}秒待って再試行します…`;
+      if (activeLoader) activeLoader.note(nm); else setStatus(nm);
       await sleep(waits[attempt], signal); continue;
     }
     const j = await res.json().catch(() => ({}));
@@ -964,110 +999,286 @@ function validateBeforeGen(entries) {
 }
 function setBusy(b) {
   $("btnGen").disabled = b; $("btnGenLine").disabled = b; $("btnStop").disabled = !b;
-  document.querySelectorAll(".chip.gen-c").forEach((x) => (x.disabled = b));
+  document.querySelectorAll(".chip.gen-c, .regen-btn").forEach((x) => (x.disabled = b));
 }
-// entries を生成し、結合済みの {blob, fname} と個別パートを返す。progress(msg) で進捗通知
-async function synthesize(entries, base, progress, onPart) {
-  const s = S();
-  const segs = segmentEntries(entries);
-  const nSpeech = segs.filter((g) => !g.se).length;
-  // 1) 各セリフ区間を生成して PCM16 を集める
-  const clips = []; let fmt = null, canJoin = true, k = 0, lastPart = null;
-  for (let i = 0; i < segs.length; i++) {
-    const seg = segs[i];
-    if (seg.se) { clips.push({ se: seg.se }); continue; }
-    k++;
-    const who = seg.spks.map((x) => s.speakers[x].alias).join(" & ");
-    progress(nSpeech > 1 ? `生成中 ${k} / ${nSpeech}(${who})` : `生成中(${who})`);
-    const datas = await callApi(buildBody(seg), abortCtl.signal);
-    const preview = seg.entries.map((e) => `${s.speakers[e.spk].alias}: ${e.text}`).join("\n");
-    const no = String(k).padStart(2, "0");
-    const decoded = datas.map((d) => ({ raw: b64ToBytes(d.data), mime: d.mimeType || "" })).map((x) => Object.assign(x, { p: toPcm(x.raw, x.mime) }));
-    let blob, fname;
-    if (decoded.every((x) => x.p)) {
-      const f = decoded[0].p;
-      const pcm = concatBytes(decoded.map((x) => x.p.pcm));
-      if (!fmt) fmt = f;
-      else if (fmt.rate !== f.rate || fmt.bits !== f.bits || fmt.ch !== f.ch) canJoin = false;
-      if (f.bits !== 16 || f.ch !== 1) canJoin = false;
-      clips.push({ pcm });
-      blob = makeWav(pcm, f.rate, f.bits, f.ch); fname = `${base}_${no}.wav`;
-    } else {
-      canJoin = false;
-      const x = decoded[0], ext = (x.mime.split("/")[1] || "bin").split(";")[0];
-      blob = new Blob([x.raw], { type: x.mime }); fname = `${base}_${no}.${ext}`;
-    }
-    lastPart = { blob, fname };
-    if (onPart) onPart(k - 1, nSpeech, who, preview, blob, fname);
+/* ---------- 生成中アニメーション ---------- */
+let activeLoader = null;
+function makeLoader(msg) {
+  const w = document.createElement("div"); w.className = "loader-wrap"; w.setAttribute("role", "status");
+  w.innerHTML = '<div class="loader"><span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="lt"></span><span class="el">0秒</span></div><div class="pbar"><i></i></div><div class="note info" hidden></div>';
+  const lt = w.querySelector(".lt"), el = w.querySelector(".el"), pb = w.querySelector(".pbar"), bar = pb.querySelector("i"), nt = w.querySelector(".note");
+  const t0 = Date.now();
+  const timer = setInterval(() => { el.textContent = Math.floor((Date.now() - t0) / 1000) + "秒"; }, 250);
+  const o = {
+    el: w,
+    set(m, frac) {
+      if (m) lt.textContent = m;
+      nt.hidden = true;
+      if (frac == null) { pb.classList.remove("det"); bar.style.width = ""; }
+      else { pb.classList.add("det"); bar.style.width = Math.max(6, Math.min(100, frac * 100)) + "%"; }
+    },
+    note(m) { nt.textContent = m; nt.hidden = !m; },
+    stop() { clearInterval(timer); w.remove(); if (activeLoader === o) activeLoader = null; },
+  };
+  o.set(msg || "生成中…");
+  activeLoader = o;
+  return o;
+}
+
+// 1セリフを生成 → {blob, pcm(PCM16 mono or null), fmt}
+async function synthEntry(e) {
+  const datas = await callApi(buildBody({ spks: [e.spk], entries: [e] }), abortCtl.signal);
+  const decoded = datas.map((d) => ({ raw: b64ToBytes(d.data), mime: d.mimeType || "" })).map((x) => Object.assign(x, { p: toPcm(x.raw, x.mime) }));
+  if (decoded.every((x) => x.p)) {
+    const f = decoded[0].p;
+    const pcm = concatBytes(decoded.map((x) => x.p.pcm));
+    const ok = f.bits === 16 && f.ch === 1 && decoded.every((x) => x.p.rate === f.rate);
+    return { blob: makeWav(pcm, f.rate, f.bits, f.ch), pcm: ok ? pcm : null, fmt: f, ext: "wav" };
   }
-  // 効果音なし・1区間ならそのまま返す
-  if (segs.length === 1 && lastPart) return { blob: lastPart.blob, fname: `${base}.${lastPart.fname.split(".").pop()}`, joined: true };
-  if (!canJoin) return { joined: false };
-  // 2) タイムライン上に並べてミックス
-  const rate = fmt ? fmt.rate : 24000;
-  progress("結合中…");
+  const x = decoded[0];
+  return { blob: new Blob([x.raw], { type: x.mime }), pcm: null, fmt: null, ext: (x.mime.split("/")[1] || "bin").split(";")[0] };
+}
+// セリフと効果音をタイムラインに並べて1本にする。結合できなければ null
+async function mixClips(clips) {
+  const s = S();
+  const speech = clips.filter((c) => !c.se);
+  if (speech.some((c) => !c.pcm)) return null;
+  const rate = speech.length ? speech[0].fmt.rate : 24000;
+  if (speech.some((c) => c.fmt.rate !== rate)) return null;
   const gap = Math.round(s.gap * rate);
   const placed = []; let lastEnd = null, total = 0;
   for (const c of clips) {
-    let data, vol = 1, start;
+    let data, vol = 1, start, f32;
     if (c.se) {
       const item = findSe(c.se.se);
       if (!item) throw new Error(`効果音「${c.se.se}」が見つかりません`);
-      data = await seSamples(item, rate); vol = item.vol;
+      data = await seSamples(item, rate); vol = item.vol * (c.se.vol != null ? c.se.vol : 1); f32 = true;
       if (c.se.offset != null) {
         // 重ねる: 直前の音の終わり + offset 秒から鳴らし、タイムラインは進めない
         start = Math.max(0, (lastEnd || 0) + Math.round(c.se.offset * rate));
-        placed.push({ data, vol, start, f32: true });
+        placed.push({ data, vol, start, f32 });
         total = Math.max(total, start + data.length);
         continue;
       }
-      start = lastEnd == null ? 0 : lastEnd + gap;
-      placed.push({ data, vol, start, f32: true });
     } else {
       const n = c.pcm.length >> 1;
-      data = new Int16Array(c.pcm.buffer.slice(c.pcm.byteOffset, c.pcm.byteOffset + n * 2));
-      start = lastEnd == null ? 0 : lastEnd + gap;
-      placed.push({ data, vol, start, f32: false });
+      data = new Int16Array(c.pcm.buffer.slice(c.pcm.byteOffset, c.pcm.byteOffset + n * 2)); f32 = false;
+      const sp = s.speakers[c.entry.spk];
+      vol = (sp && sp.vol != null ? sp.vol : 1) * (c.entry.vol != null ? c.entry.vol : 1);
     }
+    start = lastEnd == null ? 0 : lastEnd + gap;
+    placed.push({ data, vol, start, f32 });
     lastEnd = start + data.length;
     total = Math.max(total, lastEnd);
   }
-  const mix = new Float32Array(total);
+  const mix = new Float32Array(Math.max(1, total));
   for (const p of placed) {
     const d = p.data, sc = p.f32 ? p.vol : p.vol / 32768;
     for (let j = 0; j < d.length; j++) mix[p.start + j] += d[j] * sc;
   }
-  const out = new Int16Array(total);
-  for (let j = 0; j < total; j++) { const v = Math.max(-1, Math.min(1, mix[j])); out[j] = v < 0 ? v * 32768 : v * 32767; }
-  return { blob: makeWav(new Uint8Array(out.buffer), rate, 16, 1), fname: `${base}.wav`, joined: true };
+  const out = new Int16Array(mix.length);
+  for (let j = 0; j < mix.length; j++) { const v = Math.max(-1, Math.min(1, mix[j])); out[j] = v < 0 ? v * 32768 : v * 32767; }
+  return makeWav(new Uint8Array(out.buffer), rate, 16, 1);
+}
+
+/* ---------- 該当行へジャンプ ---------- */
+function locateLine(e) {
+  const lines = ta.value.split("\n");
+  const has = (i) => lines[i] != null && lines[i].includes(e.text.slice(0, 20));
+  if (has(e.line)) return e.line;
+  let best = -1;
+  for (let i = 0; i < lines.length; i++) if (has(i) && (best < 0 || Math.abs(i - e.line) < Math.abs(best - e.line))) best = i;
+  return best >= 0 ? best : Math.min(e.line, lines.length - 1);
+}
+function jumpToLine(e) {
+  const ln = locateLine(e);
+  const lines = ta.value.split("\n");
+  let start = 0; for (let i = 0; i < ln; i++) start += lines[i].length + 1;
+  const end = start + (lines[ln] || "").length;
+  // 該当行がテキスト欄の中ほどに来るようにスクロール(折り返しも考慮)
+  const full = ta.value;
+  ta.value = full.slice(0, start);
+  const h = ta.scrollHeight;
+  ta.value = full;
+  ta.scrollIntoView({ block: "center", behavior: "smooth" });
+  ta.focus({ preventScroll: true });
+  ta.setSelectionRange(start, end);
+  ta.scrollTop = Math.max(0, h - ta.clientHeight / 3);
+  remember();
+}
+
+/* ---------- 全体を生成 ---------- */
+let run = null; // { base, clips, top, partBox, sum }
+function renderPart(clip) {
+  const s = S(), e = clip.entry, sp = s.speakers[e.spk] || { alias: "?" };
+  const d = clip.ui || document.createElement("div");
+  d.className = "res"; d.innerHTML = "";
+  const h = document.createElement("div"); h.style.fontWeight = "600";
+  h.textContent = `${clip.no}. ${e.line + 1}行目 ${sp.alias}` + (clip.regenerated ? " (再生成)" : "");
+  const t = document.createElement("div"); t.className = "t"; t.textContent = e.text;
+  d.append(h, t);
+  if (clip.loader) { d.append(clip.loader.el); }
+  else {
+    const a = document.createElement("audio"); a.controls = true; a.preload = "metadata"; a.src = URL.createObjectURL(clip.blob);
+    d.append(a);
+    clip.audio = a;
+  }
+  d.append(volControl(clip.entry));
+  const row = document.createElement("div"); row.className = "row";
+  const mk = (lab, fn, dis) => { const b = document.createElement("button"); b.type = "button"; b.className = "small"; b.textContent = lab; b.onclick = fn; b.disabled = !!dis; return b; };
+  row.append(
+    mk("↻ 再生成", () => regenPart(clip), !!abortCtl),
+    mk("↗ 行へ", () => jumpToLine(clip.entry)),
+    mk("保存", () => download(clip.blob, clip.fname), !clip.blob),
+  );
+  row.querySelectorAll("button")[0].classList.add("regen-btn");
+  d.append(row);
+  clip.ui = d;
+  return d;
+}
+// 個別の音量スライダー。動かすと台本の該当行に {80%} / [名前 80%] を書き込み、完成版を作り直す
+function volControl(entry) {
+  const w = document.createElement("div"); w.className = "volrow";
+  const lab = document.createElement("span"); lab.className = "vl";
+  const r = document.createElement("input"); r.type = "range"; r.min = "0"; r.max = "200"; r.step = "5";
+  const pct = () => Math.round((entry.vol != null ? entry.vol : 1) * 100);
+  r.value = pct(); lab.textContent = `音量 ${pct()}%`;
+  r.oninput = () => { lab.textContent = `音量 ${r.value}%`; };
+  r.onchange = () => { setLineVolume(entry, Number(r.value) / 100); scheduleRemix(); };
+  const reset = document.createElement("button"); reset.type = "button"; reset.className = "small"; reset.textContent = "100%";
+  reset.onclick = () => { r.value = 100; lab.textContent = "音量 100%"; setLineVolume(entry, 1); scheduleRemix(); };
+  w.append(lab, r, reset);
+  return w;
+}
+function setLineVolume(entry, v) {
+  const p = Math.round(v * 100);
+  const lines = cur().text.split("\n");
+  const ln = entry.se != null ? locateSeLine(entry, lines) : locateLine(entry);
+  if (ln < 0 || lines[ln] == null) return;
+  let L = lines[ln];
+  if (entry.se != null) {
+    const ind = (L.match(/^\s*/) || [""])[0];
+    L = `${ind}[${entry.se}${entry.offsetStr != null ? ":" + entry.offsetStr : ""}${p !== 100 ? " " + p + "%" : ""}]`;
+  } else {
+    L = L.replace(VOL_RE, "").replace(/\s+$/, "");
+    if (p !== 100) L += ` {${p}%}`;
+  }
+  lines[ln] = L;
+  entry.vol = v;
+  const keep = [ta.selectionStart, ta.selectionEnd];
+  cur().text = lines.join("\n"); ta.value = cur().text;
+  if (document.activeElement === ta) ta.setSelectionRange(Math.min(keep[0], ta.value.length), Math.min(keep[1], ta.value.length));
+  save(); updateInfo();
+}
+function locateSeLine(entry, lines) {
+  const ok = (i) => { const m = (lines[i] || "").trim().match(SE_RE); return m && m[1].trim().toLowerCase() === entry.se.toLowerCase(); };
+  if (ok(entry.line)) return entry.line;
+  let best = -1;
+  for (let i = 0; i < lines.length; i++) if (ok(i) && (best < 0 || Math.abs(i - entry.line) < Math.abs(best - entry.line))) best = i;
+  return best;
+}
+let remixTimer = null;
+function scheduleRemix() {
+  clearTimeout(remixTimer);
+  remixTimer = setTimeout(async () => {
+    if (!run || abortCtl) return;
+    try { await updateCombined(); setStatus("音量を反映して完成版を作り直しました。"); $("status").classList.add("ok"); }
+    catch (err) { setStatus("エラー: " + err.message, true); }
+  }, 400);
+}
+function renderSeClip(clip) {
+  const e = clip.se;
+  const d = clip.ui || document.createElement("div");
+  d.className = "res se-res"; d.innerHTML = "";
+  const h = document.createElement("div"); h.style.fontWeight = "600";
+  h.textContent = `🔊 ${e.line + 1}行目 [${e.se}]` + (e.offset != null ? `(${e.offset}秒で重ねる)` : "");
+  d.append(h, volControl(e));
+  const row = document.createElement("div"); row.className = "row";
+  const mk = (lab, fn) => { const b = document.createElement("button"); b.type = "button"; b.className = "small"; b.textContent = lab; b.onclick = fn; return b; };
+  row.append(mk("▶ 試聴", () => { const it = findSe(e.se); if (it) playSe(Object.assign({}, it, { vol: it.vol * (e.vol != null ? e.vol : 1) })); }), mk("↗ 行へ", () => jumpToLine(e)));
+  d.append(row);
+  clip.ui = d;
+  return d;
+}
+
+async function updateCombined() {
+  if (!run) return;
+  const blob = await mixClips(run.clips);
+  run.top.innerHTML = "";
+  if (blob) addResult(run.top, "完成版", "", blob, `${run.base}.wav`);
+  else { const n = document.createElement("div"); n.className = "info warn"; n.textContent = "音声の形式が揃わないため、結合版は作れませんでした。"; run.top.appendChild(n); }
+}
+async function regenPart(clip) {
+  if (abortCtl) return;
+  // 台本が編集されていれば、同じ行の今の内容で生成する
+  const cand = parseScript(cur().text).entries.find((x) => x.se == null && x.line === clip.entry.line);
+  if (cand) clip.entry = cand;
+  const err = validateBeforeGen([clip.entry]);
+  if (err) { setStatus(err, true); return; }
+  setBusy(true);
+  abortCtl = new AbortController();
+  clip.loader = makeLoader(`再生成中(${S().speakers[clip.entry.spk].alias})`);
+  renderPart(clip);
+  try {
+    const r = await synthEntry(clip.entry);
+    Object.assign(clip, r, { fname: `${run.base}_${String(clip.no).padStart(2, "0")}.${r.ext}`, regenerated: true });
+    clip.loader.stop(); clip.loader = null;
+    renderPart(clip);
+    await updateCombined();
+    setStatus(`${clip.no}番(${clip.entry.line + 1}行目)を再生成し、完成版を更新しました。`);
+    $("status").classList.add("ok");
+    if (clip.audio) clip.audio.play().catch(() => {});
+  } catch (err) {
+    if (clip.loader) { clip.loader.stop(); clip.loader = null; }
+    renderPart(clip);
+    if (err.name === "AbortError") setStatus("停止しました。");
+    else setStatus("エラー: " + err.message, true);
+  } finally {
+    setBusy(false); abortCtl = null;
+  }
 }
 
 $("btnGen").onclick = async () => {
   const { entries } = parseScript(cur().text);
   const err = validateBeforeGen(entries);
   if (err) { setStatus(err, true); return; }
-  const segCount = segmentEntries(entries).filter((g) => !g.se).length;
+  const speech = entries.filter((e) => e.se == null);
   $("results").innerHTML = "";
   const top = document.createElement("div"); $("results").appendChild(top);
-  const det = document.createElement("details"); det.className = "parts";
-  const sum = document.createElement("summary"); sum.textContent = "個別パート"; det.appendChild(sum);
+  const det = document.createElement("details"); det.className = "parts"; det.open = true;
+  const sum = document.createElement("summary"); sum.textContent = "個別音声・音量"; det.appendChild(sum);
   const partBox = document.createElement("div"); det.appendChild(partBox);
-  if (segCount > 1) $("results").appendChild(det);
+  if (entries.length) $("results").appendChild(det);
+  run = { base: safeName(cur().name), clips: [], top, partBox, sum };
 
   setBusy(true);
   abortCtl = new AbortController();
+  setStatus("");
+  const ld = makeLoader("準備中…");
+  $("status").before(ld.el);
   try {
-    const r = await synthesize(entries, safeName(cur().name), (m) => setStatus(m), (i, n, who, preview, blob, fname) => {
-      if (n > 1) { addResult(partBox, `パート ${i + 1}(${who})`, preview, blob, fname); sum.textContent = `個別パート(${i + 1}件)`; }
-    });
-    if (r.joined) addResult(top, "完成版", "", r.blob, r.fname);
-    setStatus(r.joined ? "完了しました。" : "完了しました(形式が揃わないため結合はできませんでした)。");
+    let k = 0;
+    for (const e of entries) {
+      if (e.se != null) { const c = { se: e }; run.clips.push(c); partBox.appendChild(renderSeClip(c)); continue; }
+      k++;
+      const who = S().speakers[e.spk].alias;
+      ld.set(speech.length > 1 ? `生成中 ${k} / ${speech.length}(${who})` : `生成中(${who})`, speech.length > 1 ? (k - 0.5) / speech.length : null);
+      const r = await synthEntry(e);
+      const clip = Object.assign({ entry: e, no: k, fname: `${run.base}_${String(k).padStart(2, "0")}.${r.ext}` }, r);
+      run.clips.push(clip);
+      partBox.appendChild(renderPart(clip));
+      sum.textContent = `個別音声・音量(${k}件)`;
+    }
+    ld.set("結合中…", 1);
+    await updateCombined();
+    setStatus("完了しました。");
     $("status").classList.add("ok");
   } catch (err) {
     if (err.name === "AbortError") setStatus("停止しました。");
     else setStatus("エラー: " + err.message, true);
   } finally {
-    setBusy(false); abortCtl = null;
+    ld.stop(); setBusy(false); abortCtl = null;
+    if (run) run.clips.forEach((c) => c.ui && !c.se && renderPart(c));
   }
 };
 
@@ -1076,7 +1287,7 @@ function entryAtCursor() {
   const { entries } = parseScript(cur().text);
   const pos = sel.s == null ? 0 : Math.min(sel.s, ta.value.length);
   const line = ta.value.slice(0, pos).split("\n").length - 1;
-  let hit = entries.find((e) => line >= e.line && line <= e.endLine);
+  let hit = entries.find((e) => e.line === line);
   if (!hit) hit = entries.filter((e) => e.line <= line).pop() || entries[0];
   return hit ? [hit] : [];
 }
@@ -1087,6 +1298,7 @@ function miniShow(msg, isErr) {
 }
 $("miniClose").onclick = () => { if (abortCtl) abortCtl.abort(); $("mini").hidden = true; $("miniBody").innerHTML = ""; };
 async function generateCurrentLine() {
+  if (abortCtl) return;
   const entries = entryAtCursor();
   const err = validateBeforeGen(entries);
   if (err) { miniShow(err, true); return; }
@@ -1096,16 +1308,20 @@ async function generateCurrentLine() {
   $("miniBody").innerHTML = "";
   setBusy(true);
   abortCtl = new AbortController();
+  const head = `${e.line + 1}行目 ${sp.alias}`;
+  miniShow(`${head}: ${e.text.slice(0, 40)}`);
+  const ld = makeLoader(`生成中(${sp.alias})`);
+  $("miniBody").appendChild(ld.el);
   try {
-    const head = `${e.line + 1}行目 ${sp.alias}`;
-    const r = await synthesize(entries, `${safeName(cur().name)}_L${e.line + 1}`, (m) => miniShow(`${head}: ${m}`));
-    miniShow(`${head}: ${e.text.replace(/\n/g, " ").slice(0, 40)}`);
+    const r = await synthEntry(e);
+    ld.stop();
+    const fname = `${safeName(cur().name)}_L${e.line + 1}.${r.ext}`;
     const a = document.createElement("audio"); a.controls = true; a.src = URL.createObjectURL(r.blob);
     const row = document.createElement("div"); row.className = "row";
     const regen = document.createElement("button"); regen.type = "button"; regen.className = "small"; regen.textContent = "↻ 再生成";
     regen.onclick = generateCurrentLine;
     const sv = document.createElement("button"); sv.type = "button"; sv.className = "small"; sv.textContent = "保存";
-    sv.onclick = () => download(r.blob, r.fname);
+    sv.onclick = () => download(r.blob, fname);
     row.append(regen, sv);
     $("miniBody").append(a, row);
     a.play().catch(() => {});
@@ -1113,7 +1329,7 @@ async function generateCurrentLine() {
     if (err.name === "AbortError") miniShow("停止しました。");
     else miniShow("エラー: " + err.message, true);
   } finally {
-    setBusy(false); abortCtl = null;
+    ld.stop(); setBusy(false); abortCtl = null;
   }
 }
 $("btnGenLine").onclick = generateCurrentLine;
