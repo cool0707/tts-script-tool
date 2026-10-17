@@ -199,7 +199,7 @@ const DEFAULTS = {
   voiceCache: [],
   showPresets: false,
   tags: null,
-  drive: { folder: "", key: "", auto: true },
+  drive: { folder: "", key: "", auto: true, pending: false },
 };
 const DEFAULT_TAGS = ["<laugh>", "<chuckle>", "<giggle>", "<gasp>", "<sigh>", "<breath>", "<short pause>", "<long pause>", "<whispers>", "<cry>", "<sob>", "<cough>", "<yawn>", "<phew>", "<tsk>", "<shout>", "<scream>"];
 // Gemini 3.8 TTS ドキュメントの推奨タグ
@@ -410,10 +410,51 @@ function driveInfo(msg, cls) { $("driveInfo").textContent = msg; $("driveInfo").
 async function driveJson(url) {
   const res = await fetch(url);
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((j.error && j.error.message) || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const e = new Error((j.error && j.error.message) || `HTTP ${res.status}`);
+    if ([400, 401, 403, 404].includes(res.status) && !/rate|quota/i.test(e.message)) e.fatal = true;
+    throw e;
+  }
   return j;
 }
 let driveBusy = false;
+let wakeLock = null;
+// 同期中は画面がスリープしないようにする(対応ブラウザのみ)
+async function keepAwake(on) {
+  try {
+    if (on) {
+      if (!wakeLock && "wakeLock" in navigator && document.visibilityState === "visible") {
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", () => { wakeLock = null; });
+      }
+    } else if (wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch (e) { wakeLock = null; }
+}
+const isActive = () => document.visibilityState === "visible" && navigator.onLine !== false;
+// 画面が表示されていて、オンラインになるまで待つ
+function waitActive() {
+  if (isActive()) return Promise.resolve();
+  return new Promise((res) => {
+    const check = () => { if (isActive()) { document.removeEventListener("visibilitychange", check); window.removeEventListener("online", check); res(); } };
+    document.addEventListener("visibilitychange", check);
+    window.addEventListener("online", check);
+  });
+}
+// 失敗したら画面復帰を待って再試行
+async function withRetry(fn, tries) {
+  const waits = [1000, 3000, 6000, 10000];
+  for (let i = 0; ; i++) {
+    await waitActive();
+    try { return await fn(); }
+    catch (err) {
+      if (err && err.fatal) throw err;
+      if (i >= tries - 1) throw err;
+      await new Promise((r) => setTimeout(r, waits[Math.min(i, waits.length - 1)]));
+    }
+  }
+}
+function setPending(v) { if (!!S().drive.pending !== v) { S().drive.pending = v; save(); } }
+
 async function driveSync(quiet) {
   const d = S().drive;
   const fid = parseFolderId(d.folder);
@@ -422,8 +463,12 @@ async function driveSync(quiet) {
   if (!key) { if (!quiet) driveInfo("APIキーがありません。", "warn"); return; }
   if (driveBusy) return;
   driveBusy = true; $("btnDriveSync").disabled = true;
+  setPending(true);
+  keepAwake(true);
+  let ld = null;
   driveInfo("Driveを確認中…");
   try {
+    // 1) 一覧取得
     const files = []; let token = "";
     do {
       const q = new URLSearchParams({
@@ -432,59 +477,107 @@ async function driveSync(quiet) {
         pageSize: "1000", key,
       });
       if (token) q.set("pageToken", token);
-      const j = await driveJson("https://www.googleapis.com/drive/v3/files?" + q);
+      const j = await withRetry(() => driveJson("https://www.googleapis.com/drive/v3/files?" + q), 4);
       files.push(...(j.files || []));
       token = j.nextPageToken || "";
     } while (token);
     const audio = files.filter((f) => /^audio\//.test(f.mimeType || "") || AUDIO_EXT.test(f.name || ""));
     const uniq = (name, self) => { let n = 2, base = name || "効果音", v = base; while (seItems.some((x) => x !== self && x.name.toLowerCase() === v.toLowerCase())) v = `${base}${n++}`; return v; };
-    let added = 0, updated = 0, removed = 0, renamed = 0, i = 0;
+
+    // 2) Driveから消えたものを削除
+    const ids = new Set(audio.map((f) => f.id));
+    let removed = 0, renamed = 0;
+    for (const x of seItems.filter((x) => x.driveId && !ids.has(x.driveId))) { await seTx("readwrite", (st) => st.delete(x.id)); removed++; }
+    seItems = seItems.filter((x) => !x.driveId || ids.has(x.driveId));
+
+    // 3) 名前変更(ダウンロード不要)と、ダウンロードが必要なものの洗い出し
+    const queue = [];
     for (const f of audio) {
-      i++;
       const ex = seItems.find((x) => x.driveId === f.id);
-      const nameFromDrive = seName(f.name.replace(/\.[^.]+$/, ""));
-      const needDl = !ex || ex.modifiedTime !== f.modifiedTime;
-      let blob = ex && ex.blob;
-      if (needDl) {
-        driveInfo(`ダウンロード中 ${i} / ${audio.length}: ${f.name}`);
-        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(f.id)}?alt=media&key=${encodeURIComponent(key)}`);
-        if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(`${f.name}: ` + ((j.error && j.error.message) || `HTTP ${res.status}`)); }
-        blob = await res.blob();
+      if (ex && ex.driveName !== f.name) {
+        const nn = uniq(seName(f.name.replace(/\.[^.]+$/, "")), ex);
+        if (nn !== ex.name) { renameSeInScripts(ex.name, nn); ex.name = nn; renamed++; }
+        ex.driveName = f.name; await sePut(ex);
       }
+      if (!ex || ex.modifiedTime !== f.modifiedTime || !ex.blob) queue.push(f);
+    }
+    if (removed || renamed) { renderSeList(); renderChips(); updateInfo(); }
+
+    // 4) ダウンロード(4並列・1件ずつ保存するので中断しても続きから)
+    const total = queue.length;
+    let done = 0, added = 0, updated = 0;
+    const failed = [];
+    if (total) {
+      const prev = activeLoader;
+      ld = makeLoader(`効果音をダウンロード中 0 / ${total}`);
+      activeLoader = prev;
+      $("driveInfo").before(ld.el);
+      driveInfo("");
+    }
+    let lastRender = 0;
+    const refresh = (force) => {
+      if (ld) ld.set(`効果音をダウンロード中 ${done} / ${total}` + (failed.length ? `(失敗 ${failed.length})` : ""), total ? done / total : null);
+      if (force || Date.now() - lastRender > 1500) { lastRender = Date.now(); renderSeList(); renderChips(); updateInfo(); }
+    };
+    const one = async (f) => {
+      const blob = await withRetry(async () => {
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(f.id)}?alt=media&key=${encodeURIComponent(key)}`);
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          const e = new Error(`${f.name}: ` + ((j.error && j.error.message) || `HTTP ${res.status}`));
+          if (res.status === 400 || res.status === 403 || res.status === 404) e.fatal = res.status !== 403 || !/rate|quota/i.test(e.message);
+          throw e;
+        }
+        return await res.blob();
+      }, 5);
+      const ex = seItems.find((x) => x.driveId === f.id);
       if (ex) {
-        let changed = false;
-        if (ex.driveName !== f.name) {
-          const nn = uniq(nameFromDrive, ex);
-          if (nn !== ex.name) { renameSeInScripts(ex.name, nn); ex.name = nn; renamed++; }
-          ex.driveName = f.name; changed = true;
-        }
-        if (needDl) {
-          ex.blob = blob; ex.modifiedTime = f.modifiedTime; updated++;
-          for (const k of [...seDecoded.keys()]) if (k.startsWith(ex.id + "@")) seDecoded.delete(k);
-        }
-        if (needDl || changed) await sePut(ex);
+        ex.blob = blob; ex.modifiedTime = f.modifiedTime;
+        for (const k of [...seDecoded.keys()]) if (k.startsWith(ex.id + "@")) seDecoded.delete(k);
+        await sePut(ex); updated++;
       } else {
-        const item = { id: uid(), name: uniq(nameFromDrive), vol: 1, blob, order: Date.now() + i, driveId: f.id, driveName: f.name, modifiedTime: f.modifiedTime };
+        const item = { id: uid(), name: uniq(seName(f.name.replace(/\.[^.]+$/, ""))), vol: 1, blob, order: Date.now() + done, driveId: f.id, driveName: f.name, modifiedTime: f.modifiedTime };
         await sePut(item); seItems.push(item); added++;
       }
-    }
-    const ids = new Set(audio.map((f) => f.id));
-    for (const x of seItems.filter((x) => x.driveId && !ids.has(x.driveId))) {
-      await seTx("readwrite", (st) => st.delete(x.id)); removed++;
-    }
-    seItems = seItems.filter((x) => !x.driveId || ids.has(x.driveId));
-    renderSeList(); renderChips(); updateInfo();
+    };
+    const worker = async () => {
+      while (queue.length) {
+        const f = queue.shift();
+        try { await one(f); done++; }
+        catch (err) { failed.push({ f, err }); }
+        refresh(false);
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    refresh(true);
+
     const parts = [];
     if (added) parts.push(`追加 ${added}`); if (updated) parts.push(`更新 ${updated}`);
     if (renamed) parts.push(`名前変更 ${renamed}`); if (removed) parts.push(`削除 ${removed}`);
     const now = new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
-    driveInfo(`${now} 同期済み(Driveの効果音 ${audio.length}件)` + (parts.length ? ` / ${parts.join("・")}` : ""), "ok");
+    if (failed.length) {
+      driveInfo(`${now} ${failed.length}件ダウンロードできませんでした(${failed[0].err.message})。次に画面を開いたときに続きから再開します。`, "warn");
+    } else {
+      setPending(false);
+      driveInfo(`${now} 同期済み(Driveの効果音 ${audio.length}件)` + (parts.length ? ` / ${parts.join("・")}` : ""), "ok");
+    }
   } catch (err) {
-    driveInfo("Drive同期エラー: " + err.message, "warn");
+    driveInfo("Drive同期エラー: " + err.message + "(画面を開き直すと再試行します)", "warn");
   } finally {
+    if (ld) ld.stop();
     driveBusy = false; $("btnDriveSync").disabled = false;
+    keepAwake(false);
   }
 }
+// 画面に戻ったとき・オンラインに戻ったとき、途中の同期があれば再開
+function resumeIfPending() {
+  if (!isActive()) return;
+  if (driveBusy) { keepAwake(true); return; }
+  if (S().drive.pending && S().drive.folder) driveSync(true);
+}
+document.addEventListener("visibilitychange", resumeIfPending);
+window.addEventListener("online", resumeIfPending);
+window.addEventListener("pageshow", resumeIfPending);
 $("btnDriveSync").onclick = () => driveSync(false);
 $("driveFolder").addEventListener("change", () => {
   S().drive.folder = $("driveFolder").value.trim(); save();
@@ -1339,7 +1432,7 @@ renderSettings();
 renderTagList();
 renderChips();
 renderSelect();
-seLoad().then(() => { if (S().drive.auto && S().drive.folder) driveSync(true); });
+seLoad().then(() => { if ((S().drive.auto || S().drive.pending) && S().drive.folder) driveSync(true); });
 </script>
 </body>
 </html>
