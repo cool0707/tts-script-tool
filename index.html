@@ -40,7 +40,8 @@ details.parts{margin-top:8px}
 .ins{position:sticky;top:0;z-index:5;background:var(--card);padding:4px 0}
 .chips{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:3px 0;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
-.chip{flex:0 0 auto;min-height:38px;padding:4px 12px;border-radius:19px;font-size:14px;white-space:nowrap;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+.chip{flex:0 0 auto;min-height:38px;padding:4px 12px;border-radius:19px;font-size:14px;white-space:nowrap;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
+.chip.lp{transform:scale(.94);background:color-mix(in srgb,var(--ok) 18%,var(--card));transition:transform .15s}
 .chip.spk-c{border-color:var(--acc);color:var(--acc)}
 .chip.edit{border-style:dashed;color:var(--sub)}
 .chip.se-c{border-color:var(--ok);color:var(--ok)}
@@ -183,7 +184,7 @@ body.has-live{padding-bottom:calc(96px + env(safe-area-inset-bottom))}
   <div class="info" id="driveInfo"></div>
   <input type="file" id="seIn" multiple accept="audio/*,.mp3,.wav,.m4a,.ogg,.aac">
   <div id="seList"></div>
-  <div class="hint">効果音はこの端末のブラウザ内に保存されます(JSONバックアップには含まれません)。</div>
+  <div class="hint">セリフ欄の上の効果音ボタンは、タップで台本に挿入、長押しで試聴できます。効果音はこの端末のブラウザ内に保存されます(JSONバックアップには含まれません)。</div>
 </details>
 
 <details class="box" id="dApi">
@@ -305,8 +306,30 @@ function renderChips() {
   S().tags.forEach((t) => tb.appendChild(chip(t, "", () => insertAtCursor(t, false))));
   tb.appendChild(chip("✎ 編集", "edit", () => { $("dTags").open = true; $("dTags").scrollIntoView({ behavior: "smooth" }); }));
   const eb = $("seChips"); eb.innerHTML = "";
-  seItems.forEach((x) => eb.appendChild(chip("🔊 " + x.name, "se-c", () => insertSeLine(`[${x.name}]`))));
+  seItems.forEach((x) => {
+    // タップ: 台本に挿入 / 長押し: 試聴
+    const b = chip(x.name, "se-c", () => { if (b._lp) { b._lp = false; return; } insertSeLine(`[${x.name}]`); });
+    addLongPress(b, () => playSe(x));
+    eb.appendChild(b);
+  });
   eb.appendChild(chip(seItems.length ? "✎ 効果音" : "＋ 効果音を登録", "edit", () => { $("dSe").open = true; $("dSe").scrollIntoView({ behavior: "smooth" }); }));
+}
+// 長押し(約0.45秒)で fn を呼ぶ。スクロールや指の移動ではキャンセル
+function addLongPress(el, fn) {
+  let t = null, sx = 0, sy = 0;
+  const clear = () => { if (t) { clearTimeout(t); t = null; } };
+  el.addEventListener("pointerdown", (e) => {
+    el._lp = false; sx = e.clientX; sy = e.clientY; clear();
+    t = setTimeout(() => {
+      t = null; el._lp = true;
+      el.classList.add("lp"); setTimeout(() => el.classList.remove("lp"), 400);
+      try { if (navigator.vibrate) navigator.vibrate(15); } catch (err) {}
+      fn();
+    }, 450);
+  });
+  el.addEventListener("pointermove", (e) => { if (Math.abs(e.clientX - sx) > 10 || Math.abs(e.clientY - sy) > 10) clear(); });
+  ["pointerup", "pointercancel", "pointerleave"].forEach((ev) => el.addEventListener(ev, clear));
+  el.addEventListener("contextmenu", (e) => e.preventDefault());
 }
 // 効果音は独立した1行として挿入
 function insertSeLine(str) {
